@@ -580,11 +580,13 @@ public class KookWebSocketClient
         try
         {
             // 取消之前可能存在的PONG超时检测任务，并安全地创建新的 CTS
+            CancellationToken pongToken;
             lock (_pongTimeoutLock)
             {
                 _pongTimeoutCts?.Cancel();
                 _pongTimeoutCts?.Dispose();
                 _pongTimeoutCts = new CancellationTokenSource();
+                pongToken = _pongTimeoutCts.Token;  // 在 lock 内获取 Token
             }
 
             // 使用Interlocked原子操作读取_lastSequenceNumber
@@ -598,7 +600,7 @@ public class KookWebSocketClient
 
 
             // Start PONG timeout detection without Task.Run - use async pattern directly
-            _ = MonitorHeartbeatTimeoutAsync(_pongTimeoutCts.Token);
+            _ = MonitorHeartbeatTimeoutAsync(pongToken);
         }
         catch (Exception ex)
         {

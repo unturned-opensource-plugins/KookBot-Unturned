@@ -746,7 +746,9 @@ namespace Emqo.KookBot_Unturned
         {
             var lowered = message.ToLowerInvariant();
             // Use pre-cached lowercase forbidden words to avoid O(n*m) allocations
-            var matched = _forbiddenWordsLower.FirstOrDefault(w => lowered.Contains(w));
+            // Get local reference to avoid race condition during replacement
+            var forbiddenWords = _forbiddenWordsLower;
+            var matched = forbiddenWords.FirstOrDefault(w => lowered.Contains(w));
 
             if (matched == null)
             {

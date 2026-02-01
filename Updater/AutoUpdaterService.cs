@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -120,6 +121,7 @@ namespace Emqo.KookBot_Unturned.Updater
 			var name = asset.Value<string>("name");
 			var downloadUrl = asset.Value<string>("browser_download_url");
             var releasePage = latest.Value<string>("html_url") ?? "";
+            var sha256Hash = asset.Value<string>("sha256");  // Get SHA256 from release asset
 
             NotifyKook($"⬇️ New version detected: {tag}\nCurrent: {currentVersion}\nDownloading: `{name}`{(string.IsNullOrWhiteSpace(releasePage) ? "" : $"\nRelease: {releasePage}")}");
 
@@ -128,6 +130,22 @@ namespace Emqo.KookBot_Unturned.Updater
 			var tempPath = Path.Combine(tempDir, name);
 
 			await HttpDownloadAsync(downloadUrl, tempPath);
+
+			// Verify file integrity before proceeding
+			if (!string.IsNullOrWhiteSpace(sha256Hash))
+			{
+				if (!VerifyFileHash(tempPath, sha256Hash))
+				{
+					Logger.LogError($"AutoUpdater: File integrity check failed for {name}. Hash mismatch.");
+					NotifyKook($"❌ Update failed: File integrity check failed for {tag}");
+					try { File.Delete(tempPath); } catch { }
+					return;
+				}
+			}
+			else
+			{
+				Logger.LogWarning("AutoUpdater: No SHA256 hash provided for verification. Proceeding with caution.");
+			}
 
 			var dllPath = GetPluginDllPath();
 			if (string.IsNullOrWhiteSpace(dllPath) || !File.Exists(dllPath))
@@ -252,6 +270,45 @@ namespace Emqo.KookBot_Unturned.Updater
 			catch
 			{
 				return null;
+			}
+		}
+
+		/// <summary>
+		/// Verify file integrity using SHA256 hash
+		/// </summary>
+		private static bool VerifyFileHash(string filePath, string expectedHash)
+		{
+			try
+			{
+				if (!File.Exists(filePath))
+				{
+					Logger.LogError($"AutoUpdater: File not found for hash verification: {filePath}");
+					return false;
+				}
+
+				using (var sha256 = SHA256.Create())
+				using (var fileStream = File.OpenRead(filePath))
+				{
+					var hash = sha256.ComputeHash(fileStream);
+					var hashString = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+					var expectedLower = expectedHash.ToLowerInvariant();
+
+					if (hashString == expectedLower)
+					{
+						Logger.Log($"✓ File hash verification passed");
+						return true;
+					}
+					else
+					{
+						Logger.LogError($"AutoUpdater: Hash mismatch. Expected: {expectedLower}, Got: {hashString}");
+						return false;
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				Logger.LogError($"AutoUpdater: Error verifying file hash: {ex.Message}");
+				return false;
 			}
 		}
 
