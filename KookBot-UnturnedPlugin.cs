@@ -62,13 +62,16 @@ namespace Emqo.KookBot_Unturned
             {
                 try
                 {
-                    var card = KookCardFactory.BuildLifecycleCard(
+                    var fields = new List<(string, string)>
+                    {
+                        ("服务器名称", Configuration.Instance.ServerName ?? "Unturned"),
+                        ("在线人数", $"`{Provider.clients.Count}/{Provider.maxPlayers}`"),
+                        ("启动时间", $"`{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}`")
+                    };
+                    var card = KookCardFactory.BuildGenericEventCard(
                         "🟢",
                         "服务器已启动",
-                        Configuration.Instance.ServerName,
-                        "",
-                        Provider.clients.Count,
-                        Provider.maxPlayers,
+                        fields,
                         DateTimeOffset.Now,
                         "success");
                     await _kookMessageApi.CreateMessageAsync(10, Configuration.Instance.ChannelId, card);
