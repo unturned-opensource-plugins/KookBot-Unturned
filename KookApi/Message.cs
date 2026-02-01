@@ -82,14 +82,15 @@ namespace Emqo.KookBot_Unturned.KookApi
             }
             catch (WebException ex)
             {
-                // 尝试读取错误响应
+                // 尝试读取错误响应，确保 Response 被正确释放
                 if (ex.Response != null)
                 {
-                    using (var errorStream = ex.Response.GetResponseStream())
+                    using (var errorResponse = ex.Response)
+                    using (var errorStream = errorResponse.GetResponseStream())
                     using (var reader = new StreamReader(errorStream, Encoding.UTF8))
                     {
-                        var errorResponse = await reader.ReadToEndAsync();
-                        throw new Exception($"HTTP Error {(ex.Response as HttpWebResponse)?.StatusCode}: {errorResponse}", ex);
+                        var errorResponseText = await reader.ReadToEndAsync();
+                        throw new Exception($"HTTP Error {(errorResponse as HttpWebResponse)?.StatusCode}: {errorResponseText}", ex);
                     }
                 }
                 throw;

@@ -32,7 +32,8 @@ public class KookWebSocketClient
     private long _lastPongReceivedTicks;  // 使用Ticks避免DateTime竞态条件
     private readonly SemaphoreSlim _reconnectSemaphore = new(1, 1);
     private Message _kookMessageApi;
-    private readonly Random _random = new Random();  // Thread-safe via lock
+    private readonly Random _random = new Random();
+    private readonly object _randomLock = new object();  // Lock for Random thread safety
     private CancellationTokenSource _pongTimeoutCts;
     private readonly object _pongTimeoutLock = new object();  // Lock for CTS operations
     private readonly object _resumingLock = new object();  // Lock for _isResuming state changes
@@ -80,10 +81,18 @@ public class KookWebSocketClient
 
     public async Task StopAsync()
     {
-        _cancellationTokenSource?.Cancel();
-        _heartbeatTimer?.Dispose();
-        await CloseWebSocketAsync();
-        _cancellationTokenSource?.Dispose();
+        try
+        {
+            _cancellationTokenSource?.Cancel();
+            _heartbeatTimer?.Dispose();
+            _heartbeatTimer = null;
+            await CloseWebSocketAsync();
+        }
+        finally
+        {
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
+        }
     }
 
     private async Task ConnectWithRetryAsync()
@@ -559,7 +568,11 @@ public class KookWebSocketClient
 
         int baseIntervalMs = BaseHeartbeatIntervalSeconds * 1000; // 30秒转换为毫秒
                                                                   // Random.Next(minValue, maxValue) 是左闭右开区间，所以 maxValue 要 +1
-        int randomOffsetMs = _random.Next(-HeartbeatRandomOffsetMs, HeartbeatRandomOffsetMs + 1); // -5000 到 +5000 毫秒
+        int randomOffsetMs;
+        lock (_randomLock)
+        {
+            randomOffsetMs = _random.Next(-HeartbeatRandomOffsetMs, HeartbeatRandomOffsetMs + 1); // -5000 到 +5000 毫秒
+        }
         int adjustedInterval = baseIntervalMs + randomOffsetMs;
 
         // 确保间隔不会过短，例如至少 1 秒
@@ -816,8 +829,23 @@ public class KookWebSocketClient
 
     private async Task HandleReconnectAsync()
     {
-        _heartbeatTimer?.Dispose();
-        await ConnectWithRetryAsync();
+        // 使用同一个信号量保护所有重连操作，防止任务堆积
+        if (!await _reconnectSemaphore.WaitAsync(0))
+        {
+            Logger.Log("Reconnection already in progress, skipping...");
+            return;
+        }
+
+        try
+        {
+            _heartbeatTimer?.Dispose();
+            _heartbeatTimer = null;
+            await ConnectWithRetryAsync();
+        }
+        finally
+        {
+            _reconnectSemaphore.Release();
+        }
     }
 
     private async Task HandleReconnectPacketAsync()

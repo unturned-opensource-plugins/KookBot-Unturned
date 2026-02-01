@@ -67,6 +67,10 @@ namespace Emqo.KookBot_Unturned
                 _watcher.Renamed -= OnFileChanged;
                 _watcher.Dispose();
                 _watcher = null;
+
+                // Dispose SemaphoreSlim to release resources
+                _semaphore?.Dispose();
+
                 Logger.Log("🛑 Configuration hot reload stopped.");
             }
             catch (Exception ex)

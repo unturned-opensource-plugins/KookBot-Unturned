@@ -318,6 +318,9 @@ namespace Emqo.KookBot_Unturned
 
         private static void OnPlayerDisconnected(UnturnedPlayer player)
         {
+            // 清理玩家数据，防止内存泄漏
+            ChatModerationManager.CleanupPlayerData(player.CSteamID);
+
             // 检查事件是否启用
             if (!CheckEventEnabled("PlayerLeft"))
                 return;
