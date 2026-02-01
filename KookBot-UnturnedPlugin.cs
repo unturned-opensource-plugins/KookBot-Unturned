@@ -65,8 +65,8 @@ namespace Emqo.KookBot_Unturned
                     var fields = new List<(string, string)>
                     {
                         ("服务器名称", Configuration.Instance.ServerName ?? "Unturned"),
-                        ("在线人数", $"`{Provider.clients.Count}/{Provider.maxPlayers}`"),
-                        ("启动时间", $"`{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}`")
+                        ("在线人数", $"{Provider.clients.Count}/{Provider.maxPlayers}"),
+                        ("启动时间", DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss"))
                     };
                     var card = KookCardFactory.BuildGenericEventCard(
                         "🟢",
