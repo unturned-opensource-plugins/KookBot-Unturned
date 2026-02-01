@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+	  <LangVersion>latest</LangVersion>
+	  <RootNamespace>Emqo.KookBot_Unturned</RootNamespace>
+    <Version>1.2.0</Version>
+    <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+  </PropertyGroup>
+
+  <ItemGroup>
+	  <PackageReference Include="RestoreMonarchy.RocketRedist" Version="3.*" ExcludeAssets="runtime" />
+	  <PackageReference Include="System.Net.WebSockets.Client" Version="4.3.2" />
+	  <PackageReference Include="System.Buffers" Version="4.5.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Updater\AutoUpdaterService.cs" />
+    <Compile Include="Updater\AutoUpdaterService.cs" />
+  </ItemGroup>
+
+</Project>

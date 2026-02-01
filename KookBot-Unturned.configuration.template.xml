@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  KookBot-Unturned 配置模板（带详细注释）
+  使用方法：
+  1) 将本文件重命名为：KookBot-Unturned.configuration.xml
+  2) 放置到服务器实例目录下（通常：Servers/<实例名>/Rocket/Plugins/KookBot-Unturned/）
+  3) 保存后无需重启，插件将自动热重载（日志显示：✅ Configuration hot reload applied.）
+-->
+<KookBot_UnturnedConfiguration xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <!-- 服务器在 KOOK 卡片中的显示名称 -->
+  <ServerName>Unturned</ServerName>
+
+  <!-- KOOK 机器人 Token（必填）。强烈建议放到私密环境，切勿公开。 -->
+  <BotToken>PUT_YOUR_KOOK_BOT_TOKEN_HERE</BotToken>
+
+  <!-- 机器人推送的目标频道 ID（必填）。可以在 KOOK 开发者工具或日志中获取。 -->
+  <ChannelId>PUT_TARGET_CHANNEL_ID_HERE</ChannelId>
+
+  <!-- KOOK -> 游戏 的消息转发开关：true 开启，false 关闭 -->
+  <EnableSync>true</EnableSync>
+
+  <!-- KOOK -> 游戏 的消息前缀（当 EnableSync=true 时生效） -->
+  <MessagePrefix>[Unturned]</MessagePrefix>
+
+  <!-- 是否处理来自 KOOK 的消息（若为 false，则 KOOK 收到的消息与指令均被忽略） -->
+  <KookToGame>true</KookToGame>
+
+  <!-- 是否在“玩家复活”卡片中展示坐标。为 false 可保护隐私。 -->
+  <ExposeReviveCoordinates>false</ExposeReviveCoordinates>
+
+  <!-- 游戏 -> KOOK 的事件转发开关表（按需启用/禁用某些事件） -->
+  <GameToKookSettings>
+    <!-- 玩家加入 -->
+    <SettingItem><Key>PlayerJoined</Key><Value>true</Value></SettingItem>
+    <!-- 玩家离开 -->
+    <SettingItem><Key>PlayerLeft</Key><Value>true</Value></SettingItem>
+    <!-- 玩家死亡 -->
+    <SettingItem><Key>PlayerDeath</Key><Value>true</Value></SettingItem>
+    <!-- 玩家复活（可配合 ExposeReviveCoordinates 控制坐标是否显示） -->
+    <SettingItem><Key>PlayerRevive</Key><Value>true</Value></SettingItem>
+    <!-- 游戏聊天消息（将使用卡片格式转发） -->
+    <SettingItem><Key>ChatMessage</Key><Value>true</Value></SettingItem>
+    <!-- PvP 伤害事件（攻击/受击提示） -->
+    <SettingItem><Key>PlayerDamaged</Key><Value>true</Value></SettingItem>
+    <!-- 服务器启动 -->
+    <SettingItem><Key>ServerStart</Key><Value>true</Value></SettingItem>
+    <!-- 服务器停止 -->
+    <SettingItem><Key>ServerStop</Key><Value>true</Value></SettingItem>
+  </GameToKookSettings>
+
+  <!-- KOOK 指令开关（禁用后，用户执行该指令会收到“禁用”卡片提示） -->
+  <CommandSettings>
+    <!-- 查看指令帮助（卡片） -->
+    <SettingItem><Key>help</Key><Value>true</Value></SettingItem>
+    <!-- 查看服务器状态（TPS、在线、排队、运行时间） -->
+    <SettingItem><Key>status</Key><Value>true</Value></SettingItem>
+    <!-- 管理员广播到游戏内 -->
+    <SettingItem><Key>say</Key><Value>true</Value></SettingItem>
+    <!-- 执行控制台指令（/cmd、/console、/exec 等效） -->
+    <SettingItem><Key>cmd</Key><Value>true</Value></SettingItem>
+    <SettingItem><Key>console</Key><Value>true</Value></SettingItem>
+    <SettingItem><Key>exec</Key><Value>true</Value></SettingItem>
+  </CommandSettings>
+
+  <!-- KOOK 管理员用户 ID 列表（允许使用 /say /cmd 等管理指令） -->
+  <Admin>
+    <string>123456</string>
+    <string>654321</string>
+  </Admin>
+
+  <!-- 调试模式（true 输出更详细日志；false 仅关键日志） -->
+  <Debug>false</Debug>
+
+  <!-- 聊天与内容审核配置 -->
+  <Moderation>
+    <!-- 总开关：开启后才会应用各类限制/过滤 -->
+    <EnableModeration>true</EnableModeration>
+
+    <!-- 启用刷屏检测（基于时间窗口与每秒上限） -->
+    <EnableSpamDetection>true</EnableSpamDetection>
+
+    <!-- 在 SpamIntervalSeconds 秒内允许的最大消息数（超过则判为刷屏） -->
+    <SpamMessageLimit>5</SpamMessageLimit>
+
+    <!-- 刷屏检测的滑动窗口长度（单位：秒），与 SpamMessageLimit 配合使用 -->
+    <SpamIntervalSeconds>8</SpamIntervalSeconds>
+
+    <!-- 新增：每秒消息上限（瞬时控制，>0 有效；0 表示关闭“每秒上限”） -->
+    <MaxMessagesPerSecond>3</MaxMessagesPerSecond>
+
+    <!-- 触发自动禁言时的默认时长（单位：秒），0 表示不自动禁言 -->
+    <AutoMuteDurationSeconds>120</AutoMuteDurationSeconds>
+
+    <!-- 启用违禁词过滤（简单包含匹配 ForbiddenWords） -->
+    <EnableForbiddenWordFilter>true</EnableForbiddenWordFilter>
+
+    <!-- 命中违禁词是否自动禁言（否：仅拦截并提示） -->
+    <AutoMuteOnForbiddenWord>false</AutoMuteOnForbiddenWord>
+
+    <!-- 违禁词列表（小写/大写均可，内部做不区分大小写匹配） -->
+    <ForbiddenWords>
+      <string>外挂</string>
+      <string>作弊器</string>
+      <string>刷钱</string>
+    </ForbiddenWords>
+
+    <!-- 相邻两条消息的最小间隔（秒）。小于该间隔直接拦截（逐条节流）。 -->
+    <MinimumSecondsBetweenMessages>1</MinimumSecondsBetweenMessages>
+
+    <!-- 各种拦截时的提示文案（游戏内反馈给玩家） -->
+    <SpamWarningMessage>你说话太频繁了，稍后再试。</SpamWarningMessage>
+    <ForbiddenWordWarningMessage>消息包含违禁词，已被拦截。</ForbiddenWordWarningMessage>
+    <MinIntervalWarningMessage>说话太快啦，请稍后再试。</MinIntervalWarningMessage>
+
+    <!-- 手动禁言（如未来扩展）时的默认分钟数 -->
+    <DefaultManualMuteMinutes>10</DefaultManualMuteMinutes>
+
+    <!-- 启用脏话检测（ProfanityWords/ProfanityPatterns） -->
+    <EnableProfanityFilter>true</EnableProfanityFilter>
+
+    <!-- 命中脏话时是否用掩码替换（true 替换；false 直接拦截） -->
+    <ReplaceProfanityWithMask>true</ReplaceProfanityWithMask>
+
+    <!-- 掩码字符串（如 ***） -->
+    <ProfanityMask>***</ProfanityMask>
+
+    <!-- 脏话拦截时的提示文案（当 ReplaceProfanityWithMask=false 时生效） -->
+    <ProfanityWarningMessage>消息包含不当言辞，已被拦截。</ProfanityWarningMessage>
+
+    <!-- 命中脏话是否自动禁言 -->
+    <AutoMuteOnProfanity>false</AutoMuteOnProfanity>
+
+    <!-- 脏话自动禁言时长（秒） -->
+    <AutoMuteProfanitySeconds>300</AutoMuteProfanitySeconds>
+
+    <!-- 简单词表（不区分大小写，包含即命中） -->
+    <ProfanityWords>
+      <string>fuck</string>
+      <string>shit</string>
+      <string>bitch</string>
+      <string>asshole</string>
+      <string>bastard</string>
+      <string>sb</string>
+      <string>cnm</string>
+      <string>nmsl</string>
+      <string>wdnmd</string>
+      <string>mlgb</string>
+      <string>傻逼</string>
+      <string>煞笔</string>
+      <string>妈的</string>
+      <string>操你</string>
+      <string>草泥马</string>
+      <string>日你</string>
+    </ProfanityWords>
+
+    <!-- 模式匹配（正则表达式，忽略大小写，可匹配空格变体） -->
+    <ProfanityPatterns>
+      <string>f\s*u\s*c\s*k</string>
+      <string>s\s*h\s*i\s*t</string>
+      <string>b\s*i\s*t\s*c\s*h</string>
+      <string>c\s*a\s*o\s*n\s*i</string>
+      <string>n\s*m\s*s\s*l</string>
+    </ProfanityPatterns>
+  </Moderation>
+
+</KookBot_UnturnedConfiguration>
+
+
