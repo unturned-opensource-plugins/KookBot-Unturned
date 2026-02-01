@@ -56,7 +56,29 @@ namespace Emqo.KookBot_Unturned
             _kookMessageApi = new Message(Configuration.Instance.BotToken);
 
             Events.Initialize(_kookMessageApi, Configuration.Instance.ChannelId, _configProvider);
-            Logger.Log("📤 Server start event sent to KOOK");
+
+            // 发送服务器启动消息到 Kook
+            if (Configuration.Instance.IsGameToKookEnabled("ServerStart"))
+            {
+                try
+                {
+                    var card = KookCardFactory.BuildLifecycleCard(
+                        "🟢",
+                        "服务器已启动",
+                        Configuration.Instance.ServerName,
+                        "",
+                        Provider.clients.Count,
+                        Provider.maxPlayers,
+                        DateTimeOffset.Now,
+                        "success");
+                    await _kookMessageApi.CreateMessageAsync(10, Configuration.Instance.ChannelId, card);
+                    Logger.Log("📤 Server start event sent to KOOK");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"❌ Failed to send server start message to KOOK: {ex.Message}");
+                }
+            }
 
             // Start auto updater if enabled
             try
