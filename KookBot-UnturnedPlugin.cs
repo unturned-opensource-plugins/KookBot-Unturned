@@ -1,4 +1,4 @@
-﻿using Emqo.KookBot_Unturned.KookApi;
+using Emqo.KookBot_Unturned.KookApi;
 using Rocket.API.Collections;
 using Rocket.Core.Logging;
 using Rocket.Core.Plugins;
@@ -27,121 +27,135 @@ namespace Emqo.KookBot_Unturned
 
         protected override async void Load()
         {
-            Instance = this;
-            _startedAt = DateTimeOffset.UtcNow;
-            _configProvider = new DefaultConfigurationProvider(() => Configuration?.Instance);
-
-            if (Configuration.Instance.GameToKookSettings == null || Configuration.Instance.CommandSettings == null)
+            try
             {
-                Configuration.Instance.LoadDefaults();
-            }
-            else
-            {
-                Configuration.Instance.ConvertListsToDictionaries();
-            }
+                Logger.Log("🔍 KookBot-Unturned plugin loading...");
 
-            // Validate critical configuration
-            if (string.IsNullOrWhiteSpace(Configuration.Instance.BotToken))
-            {
-                Logger.LogError("❌ BotToken is not configured. Plugin cannot start.");
-                return;
-            }
+                Instance = this;
+                _startedAt = DateTimeOffset.UtcNow;
+                _configProvider = new DefaultConfigurationProvider(() => Configuration?.Instance);
 
-            if (string.IsNullOrWhiteSpace(Configuration.Instance.ChannelId))
-            {
-                Logger.LogWarning("⚠️ ChannelId is not configured. Game-to-Kook events will not be sent.");
-            }
+                if (Configuration.Instance.GameToKookSettings == null || Configuration.Instance.CommandSettings == null)
+                {
+                    Logger.Log("🔍 Loading default configuration...");
+                    Configuration.Instance.LoadDefaults();
+                }
+                else
+                {
+                    Logger.Log("🔍 Converting configuration lists to dictionaries...");
+                    Configuration.Instance.ConvertListsToDictionaries();
+                }
 
-            ChatModerationManager.Initialize(Configuration.Instance, _configProvider);
-            _kookMessageApi = new Message(Configuration.Instance.BotToken);
+                // Validate critical configuration
+                if (string.IsNullOrWhiteSpace(Configuration.Instance.BotToken))
+                {
+                    Logger.LogError("❌ BotToken is not configured. Plugin cannot start.");
+                    return;
+                }
 
-            Events.Initialize(_kookMessageApi, Configuration.Instance.ChannelId, _configProvider);
+                if (string.IsNullOrWhiteSpace(Configuration.Instance.ChannelId))
+                {
+                    Logger.LogWarning("⚠️ ChannelId is not configured. Game-to-Kook events will not be sent.");
+                }
 
-            // 发送服务器启动消息到 Kook
-            if (Configuration.Instance.IsGameToKookEnabled("ServerStart"))
-            {
+                Logger.Log("🔍 Initializing ChatModerationManager...");
+                ChatModerationManager.Initialize(Configuration.Instance, _configProvider);
+
+                Logger.Log("🔍 Creating Kook message API...");
+                _kookMessageApi = new Message(Configuration.Instance.BotToken);
+
+                Logger.Log("🔍 Initializing Events system...");
+                Events.Initialize(_kookMessageApi, Configuration.Instance.ChannelId, _configProvider);
+
+                // Start auto updater if enabled
                 try
                 {
-                    var fields = new List<(string, string)>
-                    {
-                        ("服务器名称", Configuration.Instance.ServerName ?? "Unturned"),
-                        ("在线人数", $"{Provider.clients.Count}/{Provider.maxPlayers}"),
-                        ("启动时间", DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss"))
-                    };
-                    var card = KookCardFactory.BuildGenericEventCard(
-                        "🟢",
-                        "服务器已启动",
-                        fields,
-                        DateTimeOffset.Now,
-                        "success");
-                    await _kookMessageApi.CreateMessageAsync(10, Configuration.Instance.ChannelId, card);
-                    Logger.Log("📤 Server start event sent to KOOK");
+                    Logger.Log("🔍 Starting AutoUpdaterService...");
+                    AutoUpdaterService.Start();
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError($"❌ Failed to send server start message to KOOK: {ex.Message}");
+                    Logger.LogError($"AutoUpdater start failed: {ex.Message}");
                 }
-            }
 
-            // Start auto updater if enabled
-            try
-            {
-                AutoUpdaterService.Start();
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"AutoUpdater start failed: {ex.Message}");
-            }
-
-            authid = await _kookMessageApi.GetMeAsync();
-
-            _client = new KookWebSocketClient(Configuration.Instance.BotToken, _configProvider);
-            try
-            {
-                await _client.StartAsync();
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"❌ WebSocket client start failed: {ex.Message}");
-                if (ex.InnerException != null)
-                {
-                    Logger.LogError($"Inner exception: {ex.InnerException.Message}");
-                }
-            }
-            Commands.Init(_kookMessageApi);
-
-            _configFilePath = ResolveConfigPath();
-            ConfigurationHotReloadService.Start(_configFilePath);
-            if (Configuration.Instance.IsGameToKookEnabled("ServerStart")) {
+                Logger.Log("🔍 Getting bot info from Kook API...");
                 try
                 {
-                    var card = KookApi.KookCardFactory.BuildLifecycleCard(
-                        $"{Configuration.Instance.ServerName} 已启动",
-                        $"🟢 {Provider.serverName} 服务器已上线",
-                        new[]
-                        {
-                            ("地图", $"`{Provider.map}`"),
-                            ("最大玩家", $"`{Provider.maxPlayers}`"),
-                            ("启动时间", $"`{DateTime.Now:yyyy-MM-dd HH:mm:ss}`")
-                        },
-                        "success"
-                    );
-
-                    await _kookMessageApi.CreateMessageAsync(10, Configuration.Instance.ChannelId, card);
-                    Logger.Log("✅ Server start message sent to KOOK successfully");
+                    authid = await _kookMessageApi.GetMeAsync();
+                    Logger.Log($"✅ Got bot info: {authid}");
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError($"❌ Failed to send server start message to KOOK: {ex.Message}");
+                    Logger.LogError($"❌ Failed to get bot info from Kook API: {ex.Message}");
+                    Logger.LogError($"Stack trace: {ex.StackTrace}");
+                    return;
+                }
+
+                Logger.Log("🔍 Starting WebSocket client...");
+                _client = new KookWebSocketClient(Configuration.Instance.BotToken, _configProvider);
+                try
+                {
+                    // 后台启动 WebSocket，不阻塞主线程
+                    _ = _client.StartAsync();
+                    Logger.Log("✅ WebSocket client starting in background");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"❌ WebSocket client start failed: {ex.Message}");
                     if (ex.InnerException != null)
                     {
                         Logger.LogError($"Inner exception: {ex.InnerException.Message}");
                     }
                 }
+
+                Logger.Log("🔍 Initializing commands...");
+                Commands.Init(_kookMessageApi);
+
+                Logger.Log("🔍 Starting configuration hot reload service...");
+                _configFilePath = ResolveConfigPath();
+                ConfigurationHotReloadService.Start(_configFilePath);
+
+                // 发送服务器启动消息到 Kook
+                if (Configuration.Instance.IsGameToKookEnabled("ServerStart"))
+                {
+                    Logger.Log("🔍 Sending server start message to Kook...");
+                    try
+                    {
+                        var card = KookApi.KookCardFactory.BuildLifecycleCard(
+                            "🟢 服务器已启动",
+                            $"**服务器名称**：`{Configuration.Instance.ServerName ?? "Unturned"}`\n**地图**：`{Provider.map}`\n**最大玩家**：`{Provider.maxPlayers}`\n**启动时间**：`{DateTime.Now:yyyy-MM-dd HH:mm:ss}`",
+                            new (string, string)[0],
+                            "success"
+                        );
+
+                        await _kookMessageApi.CreateMessageAsync(10, Configuration.Instance.ChannelId, card);
+                        Logger.Log("✅ Server start message sent to KOOK successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"❌ Failed to send server start message to KOOK: {ex.Message}");
+                        if (ex.InnerException != null)
+                        {
+                            Logger.LogError($"Inner exception: {ex.InnerException.Message}");
+                        }
+                    }
+                }
+                else
+                {
+                    Logger.Log("⚠️ ServerStart event is disabled in config");
+                }
+
+                Logger.Log("✅ KookBot-Unturned plugin loaded successfully");
             }
-            
-
-
+            catch (Exception ex)
+            {
+                Logger.LogError($"❌ Critical error during plugin load: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    Logger.LogError($"Inner exception: {ex.InnerException.Message}");
+                }
+                Logger.LogError($"Stack trace: {ex.StackTrace}");
+            }
         }
 
         protected override async void Unload()
@@ -153,16 +167,13 @@ namespace Emqo.KookBot_Unturned
                     try
                     {
                         var card = KookApi.KookCardFactory.BuildLifecycleCard(
-                            $"{Configuration.Instance.ServerName} 已关闭",
-                            $"🔴 服务器已下线",
-                            new[]
-                            {
-                                ("关闭时间", $"`{DateTime.Now:yyyy-MM-dd HH:mm:ss}`"),
-                                ("运行时长", $"`{GetUptime():hh\\:mm\\:ss}`")
-                            },
+                            "🔴 服务器已关闭",
+                            $"**关闭时间**：`{DateTime.Now:yyyy-MM-dd HH:mm:ss}`\n**运行时长**：`{GetUptime():hh\\:mm\\:ss}`",
+                            new (string, string)[0],
                             "danger"
                         );
                         await _kookMessageApi.CreateMessageAsync(10, Configuration.Instance.ChannelId, card);
+                        Logger.Log("✅ Server stop message sent to KOOK successfully");
                     }
                     catch (Exception ex)
                     {
@@ -184,11 +195,11 @@ namespace Emqo.KookBot_Unturned
 
                 Events.Shutdown();
                 ChatModerationManager.Shutdown();
-                Logger.Log("📤 Server stop event sent to KOOK");
+                Logger.Log("✅ Plugin unloaded successfully");
             }
             catch (Exception ex)
             {
-                Logger.LogError($"Error during plugin unload: {ex.Message}");
+                Logger.LogError($"❌ Critical error during plugin unload: {ex.Message}");
             }
         }
 

@@ -18,10 +18,10 @@ namespace Emqo.KookBot_Unturned
 {
     public class Events
     {
-        private static Message _message;
-        private static string _channelId;
-        private static bool _isEnabled = true;
-        private static IConfigurationProvider _configProvider;
+        private static volatile Message _message;
+        private static volatile string _channelId;
+        private static volatile bool _isEnabled = true;
+        private static volatile IConfigurationProvider _configProvider;
         private static readonly string[] CommandPrefixes = { "/", "!", "@", ".", "#", "$" };
         private static readonly string[] FilteredCommandKeywords =
         {
@@ -288,18 +288,28 @@ namespace Emqo.KookBot_Unturned
             if (!ShouldProcessEvent(eventKey))
                 return;
 
-            // Fire and forget with exception handling
-            SafeFireAndForget(OnPlayerConnectedAsync(player), "PlayerConnected");
+            try
+            {
+                // 在同步上下文中获取所有需要的数据
+                var playerName = GetPlayerName(player);
+                var steamId = player.CSteamID.ToString();
+                var currentPlayers = Provider.clients.Count;
+                var maxPlayers = Provider.maxPlayers;
+
+                // Fire and forget with exception handling
+                SafeFireAndForget(OnPlayerConnectedAsync(playerName, steamId, currentPlayers, maxPlayers), "PlayerConnected");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error in OnPlayerConnected: {ex.Message}");
+            }
         }
 
-        private static async Task OnPlayerConnectedAsync(UnturnedPlayer player)
+        private static async Task OnPlayerConnectedAsync(string playerName, string steamId, int currentPlayers, int maxPlayers)
         {
             try
             {
-                var steamId = player.CSteamID.ToString();
-                var playerName = player.DisplayName;
-                var currentPlayers = Provider.clients.Count;
-                var maxPlayers = Provider.maxPlayers;
+                if (!ValidateEventPrerequisites()) return;
 
                 var card = KookApi.KookCardFactory.BuildLifecycleCard(
                     "🟢",
@@ -337,17 +347,28 @@ namespace Emqo.KookBot_Unturned
             if (!ShouldProcessEvent(eventKey))
                 return;
 
-            // Fire and forget with exception handling
-            SafeFireAndForget(OnPlayerDisconnectedAsync(player), "PlayerDisconnected");
+            try
+            {
+                // 在同步上下文中获取所有需要的数据
+                var playerName = GetPlayerName(player);
+                var steamId = player.CSteamID.ToString();
+                var currentPlayers = Provider.clients.Count - 1; // 减1因为玩家还没完全断开
+                var maxPlayers = Provider.maxPlayers;
+
+                // Fire and forget with exception handling
+                SafeFireAndForget(OnPlayerDisconnectedAsync(playerName, steamId, currentPlayers, maxPlayers), "PlayerDisconnected");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error in OnPlayerDisconnected: {ex.Message}");
+            }
         }
 
-        private static async Task OnPlayerDisconnectedAsync(UnturnedPlayer player)
+        private static async Task OnPlayerDisconnectedAsync(string playerName, string steamId, int currentPlayers, int maxPlayers)
         {
             try
             {
-                var steamId = player.CSteamID.ToString();
-                var playerName = player.DisplayName;
-                var currentPlayers = Provider.clients.Count - 1; // 减1因为玩家还没完全断开
+                if (!ValidateEventPrerequisites()) return;
 
                 var card = KookApi.KookCardFactory.BuildLifecycleCard(
                     "🔴",
@@ -355,7 +376,7 @@ namespace Emqo.KookBot_Unturned
                     playerName,
                     steamId,
                     currentPlayers,
-                    Provider.maxPlayers,
+                    maxPlayers,
                     DateTimeOffset.Now,
                     "warning");
 
@@ -373,23 +394,52 @@ namespace Emqo.KookBot_Unturned
 
         private static void OnPlayerDeath(UnturnedPlayer player, EDeathCause cause, ELimb limb, CSteamID murderer)
         {
-            // 检查事件是否启用
-            if (!CheckEventEnabled("PlayerDeath"))
-                return;
+            try
+            {
+                // 检查事件是否启用
+                if (!CheckEventEnabled("PlayerDeath"))
+                {
+                    if (ShouldLogDebug)
+                    {
+                        Logger.Log("⚠️ PlayerDeath event is disabled in config");
+                    }
+                    return;
+                }
 
-            // 去重检查
-            var eventKey = $"PlayerDeath_{player.CSteamID}_{DateTimeOffset.UtcNow.Ticks / 10000000}"; // 按秒分组
-            if (!ShouldProcessEvent(eventKey))
-                return;
+                // 去重检查
+                var eventKey = $"PlayerDeath_{player.CSteamID}_{DateTimeOffset.UtcNow.Ticks / 10000000}"; // 按秒分组
+                if (!ShouldProcessEvent(eventKey))
+                {
+                    if (ShouldLogDebug)
+                    {
+                        Logger.Log($"⚠️ PlayerDeath event filtered by deduplication: {eventKey}");
+                    }
+                    return;
+                }
 
-            // Fire and forget with exception handling
-            SafeFireAndForget(OnPlayerDeathAsync(player, cause, limb, murderer), "PlayerDeath");
+                if (ShouldLogDebug)
+                {
+                    Logger.Log($"🔍 PlayerDeath event triggered for {player.DisplayName}, cause: {cause}");
+                }
+
+                // Fire and forget with exception handling
+                SafeFireAndForget(OnPlayerDeathAsync(player, cause, limb, murderer), "PlayerDeath");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error in OnPlayerDeath: {ex.Message}");
+            }
         }
 
         private static async Task OnPlayerDeathAsync(UnturnedPlayer player, EDeathCause cause, ELimb limb, CSteamID murderer)
         {
             try
             {
+                if (ShouldLogDebug)
+                {
+                    Logger.Log($"🔍 OnPlayerDeathAsync started for {player?.DisplayName}");
+                }
+
                 // 添加玩家空值检查
                 if (player == null)
                 {
@@ -421,6 +471,11 @@ namespace Emqo.KookBot_Unturned
                     return;
                 }
 
+                if (ShouldLogDebug)
+                {
+                    Logger.Log($"🔍 Building death card for {playerName}, cause: {cause}");
+                }
+
                 var fields = new List<(string, string)>
                 {
                     ("玩家", playerName),
@@ -434,7 +489,14 @@ namespace Emqo.KookBot_Unturned
                 }
 
                 var deathCard = KookApi.KookCardFactory.BuildGenericEventCard("💀", "玩家死亡", fields, DateTimeOffset.Now, "danger");
+
+                if (ShouldLogDebug)
+                {
+                    Logger.Log($"🔍 Sending death card to KOOK for {playerName}");
+                }
+
                 await _message.CreateMessageAsync(10, _channelId, deathCard);
+
                 if (ShouldLogDebug)
                 {
                     Logger.Log($"📤 Player death event sent to KOOK: {playerName} - {cause}");
@@ -458,21 +520,33 @@ namespace Emqo.KookBot_Unturned
             if (!ShouldProcessEvent(eventKey))
                 return;
 
-            // Fire and forget with exception handling
-            SafeFireAndForget(OnPlayerReviveAsync(player, position), "PlayerRevive");
+            try
+            {
+                // 在同步上下文中获取所有需要的数据
+                var playerName = GetPlayerName(player);
+                var shouldExposeCoordinates = Config?.ExposeReviveCoordinates ?? false;
+
+                // Fire and forget with exception handling
+                SafeFireAndForget(OnPlayerReviveAsync(playerName, position, shouldExposeCoordinates), "PlayerRevive");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error in OnPlayerRevive: {ex.Message}");
+            }
         }
 
-        private static async Task OnPlayerReviveAsync(UnturnedPlayer player, UnityEngine.Vector3 position)
+        private static async Task OnPlayerReviveAsync(string playerName, UnityEngine.Vector3 position, bool shouldExposeCoordinates)
         {
             try
             {
-                var playerName = player.DisplayName;
+                if (!ValidateEventPrerequisites()) return;
+
                 var reviveFields = new List<(string, string)>
                 {
                     ("玩家", playerName)
                 };
                 // Security: Only expose coordinates if explicitly enabled in config
-                if (Config?.ExposeReviveCoordinates ?? false)
+                if (shouldExposeCoordinates)
                 {
                     reviveFields.Add(("坐标", $"{Math.Round(position.x, 1)}, {Math.Round(position.y, 1)}, {Math.Round(position.z, 1)}"));
                 }
@@ -512,8 +586,11 @@ namespace Emqo.KookBot_Unturned
                     return;
                 }
 
+                // 在同步上下文中获取玩家名称
+                var playerName = GetPlayerName(player);
+
                 // Async process full moderation with exception handling
-                SafeFireAndForget(ProcessChatMessageAsync(player, message, chatMode), "ChatModeration");
+                SafeFireAndForget(ProcessChatMessageAsync(player, playerName, message, chatMode), "ChatModeration");
             }
             catch (Exception ex)
             {
@@ -522,7 +599,7 @@ namespace Emqo.KookBot_Unturned
             }
         }
 
-        private static async Task ProcessChatMessageAsync(UnturnedPlayer player, string message, EChatMode chatMode)
+        private static async Task ProcessChatMessageAsync(UnturnedPlayer player, string playerName, string message, EChatMode chatMode)
         {
             try
             {
@@ -544,7 +621,14 @@ namespace Emqo.KookBot_Unturned
 
                         if (moderationResult.WasAutoMute && moderationResult.AppliedMute != null)
                         {
-                            SafeFireAndForget(SendAutoMuteNotificationAsync(player, moderationResult.AppliedMute), "AutoMuteNotification");
+                            SafeFireAndForget(SendAutoMuteNotificationAsync(playerName, moderationResult.AppliedMute), "AutoMuteNotification");
+                        }
+
+                        // 即使消息被拒绝，也发送过滤后的版本到 Kook
+                        var filteredMessage = moderationResult.SanitizedMessage ?? "**";
+                        if (_isEnabled && _message != null && Config != null && Config.IsGameToKookEnabled("ChatMessage"))
+                        {
+                            SafeFireAndForget(SendChatMessageAsync(playerName, filteredMessage, chatMode, isFiltered: true), "SendChatMessage");
                         }
 
                         return;
@@ -560,7 +644,7 @@ namespace Emqo.KookBot_Unturned
                     // 检查事件是否启用
                     if (_isEnabled && _message != null && Config != null && Config.IsGameToKookEnabled("ChatMessage"))
                     {
-                        SafeFireAndForget(SendChatMessageAsync(player, processedMessage, chatMode), "SendChatMessage");
+                        SafeFireAndForget(SendChatMessageAsync(playerName, processedMessage, chatMode, isFiltered: false), "SendChatMessage");
                     }
                 });
             }
@@ -570,24 +654,23 @@ namespace Emqo.KookBot_Unturned
             }
         }
 
-        private static async Task SendAutoMuteNotificationAsync(UnturnedPlayer player, MuteInfo appliedMute)
+        private static async Task SendAutoMuteNotificationAsync(string playerName, MuteInfo appliedMute)
         {
             try
             {
+                if (!ValidateEventPrerequisites()) return;
+
                 var durationText = appliedMute.GetDurationDescription();
 
-                if (_message != null && Config != null && Config.IsGameToKookEnabled("ChatMessage"))
+                var muteFields = new List<(string, string)>
                 {
-                    var muteFields = new List<(string, string)>
-                    {
-                        ("玩家", player.DisplayName),
-                        ("原因", appliedMute.Reason),
-                        ("时长", durationText)
-                    };
+                    ("玩家", playerName),
+                    ("原因", appliedMute.Reason),
+                    ("时长", durationText)
+                };
 
-                    var muteCard = KookApi.KookCardFactory.BuildGenericEventCard("🚫", "自动禁言", muteFields, DateTimeOffset.Now, "warning");
-                    await _message.CreateMessageAsync(10, _channelId, muteCard);
-                }
+                var muteCard = KookApi.KookCardFactory.BuildGenericEventCard("🚫", "自动禁言", muteFields, DateTimeOffset.Now, "warning");
+                await _message.CreateMessageAsync(10, _channelId, muteCard);
             }
             catch (Exception ex)
             {
@@ -595,20 +678,18 @@ namespace Emqo.KookBot_Unturned
             }
         }
 
-        private static readonly HashSet<string> FilteredCommandsWithSpace =
-            new HashSet<string>(FilteredCommandKeywords.Select(c => c + " "));
-
         // 优化：预定义命令前缀字符集，用于快速检查
         private static readonly string CommandPrefixChars = string.Concat(CommandPrefixes);
 
-        private static async Task SendChatMessageAsync(UnturnedPlayer player, string processedMessage, EChatMode chatMode)
+        private static async Task SendChatMessageAsync(string playerName, string processedMessage, EChatMode chatMode, bool isFiltered = false)
         {
             try
             {
+                if (!ValidateEventPrerequisites()) return;
                 if (chatMode != EChatMode.GLOBAL && chatMode != EChatMode.LOCAL) return;
 
                 // 过滤指令信息 - 检查消息是否以常见指令前缀开头
-                if (!string.IsNullOrEmpty(processedMessage))
+                if (!isFiltered && !string.IsNullOrEmpty(processedMessage))
                 {
                     // 优化：使用单个字符检查而不是多次 StartsWith 调用
                     if (processedMessage.Length > 0 && CommandPrefixChars.Contains(processedMessage[0]))
@@ -636,9 +717,9 @@ namespace Emqo.KookBot_Unturned
                     }
                 }
 
-                var playerName = player.DisplayName;
                 var chatModeText = chatMode == EChatMode.GLOBAL ? "全局" : "区域";
-                var card = KookApi.KookCardFactory.BuildChatMessageCard(chatModeText, playerName, processedMessage, DateTimeOffset.Now);
+                var statusTag = isFiltered ? " 🚫" : "";
+                var card = KookApi.KookCardFactory.BuildChatMessageCard(chatModeText, playerName, processedMessage, DateTimeOffset.Now, statusTag);
 
                 await _message.CreateMessageAsync(10, _channelId, card);
                 if (ShouldLogDebug)
@@ -662,42 +743,56 @@ namespace Emqo.KookBot_Unturned
             if (!shouldAllow || !CheckEventEnabled("PlayerDamaged"))
                 return;
 
-            var copiedParameters = parameters; // 复制结构体
+            try
+            {
+                var copiedParameters = parameters; // 复制结构体
 
-            // Fire and forget with exception handling
-            SafeFireAndForget(OnPlayerDamagedAsync(copiedParameters), "PlayerDamaged");
+                // 在同步上下文中提前获取所有玩家数据，避免异步执行时玩家对象被销毁
+                if (copiedParameters.player?.channel?.owner?.playerID == null)
+                    return;
+
+                var victim = UnturnedPlayer.FromCSteamID(copiedParameters.player.channel.owner.playerID.steamID);
+                var attacker = UnturnedPlayer.FromCSteamID(copiedParameters.killer);
+
+                if (victim == null || attacker == null || victim.CSteamID == attacker.CSteamID)
+                    return;
+
+                if (copiedParameters.damage < 50 && victim.Health > copiedParameters.damage)
+                    return;
+
+                // 在同步上下文中获取所有需要的数据
+                var victimName = GetPlayerName(victim);
+                var attackerName = GetPlayerName(attacker);
+                var victimHealth = victim.Health;
+                var limbText = GetLimbText(copiedParameters.limb);
+
+                // Fire and forget with exception handling
+                SafeFireAndForget(OnPlayerDamagedAsync(copiedParameters, victimName, attackerName, victimHealth, limbText), "PlayerDamaged");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error in OnPlayerDamaged: {ex.Message}");
+            }
         }
 
-        private static async Task OnPlayerDamagedAsync(DamagePlayerParameters copiedParameters)
+        private static async Task OnPlayerDamagedAsync(DamagePlayerParameters copiedParameters, string victimName, string attackerName, float victimHealth, string limbText)
         {
             try
             {
                 if (copiedParameters.killer == CSteamID.Nil) return;
 
-                // Validate player objects before accessing from background thread
-                // Add null checks for deep property access
-                if (copiedParameters.player?.channel?.owner?.playerID == null)
-                {
-                    Logger.LogWarning("Player channel/owner/playerID is null in OnPlayerDamaged");
-                    return;
-                }
-
-                var victim = UnturnedPlayer.FromCSteamID(copiedParameters.player.channel.owner.playerID.steamID);
-                var attacker = UnturnedPlayer.FromCSteamID(copiedParameters.killer);
-
-                // Null checks to prevent race conditions
-                if (victim == null || attacker == null || victim.CSteamID == attacker.CSteamID) return;
-                if (copiedParameters.damage < 50 && victim.Health > copiedParameters.damage) return;
+                // Validate prerequisites
+                if (!ValidateEventPrerequisites()) return;
 
                 var pvpFields = new List<(string, string)>
                 {
-                    ("攻击者", attacker.DisplayName),
-                    ("受害者", victim.DisplayName),
+                    ("攻击者", attackerName),
+                    ("受害者", victimName),
                     ("伤害", $"{copiedParameters.damage}"),
-                    ("部位", GetLimbText(copiedParameters.limb))
+                    ("部位", limbText)
                 };
 
-                if (victim.Health <= copiedParameters.damage)
+                if (victimHealth <= copiedParameters.damage)
                 {
                     pvpFields.Add(("结果", "致命一击"));
                 }
@@ -706,12 +801,16 @@ namespace Emqo.KookBot_Unturned
                 await _message.CreateMessageAsync(10, _channelId, pvpCard);
                 if (ShouldLogDebug)
                 {
-                    Logger.Log($"📤 PvP event sent to KOOK: {attacker.DisplayName} -> {victim.DisplayName} ({copiedParameters.damage} damage)");
+                    Logger.Log($"📤 PvP event sent to KOOK: {attackerName} -> {victimName} ({copiedParameters.damage} damage)");
                 }
             }
             catch (Exception ex)
             {
                 Logger.LogError($"Error sending PvP event: {ex.Message}");
+                if (ShouldLogDebug)
+                {
+                    Logger.LogError($"Stack trace: {ex.StackTrace}");
+                }
             }
         }
 

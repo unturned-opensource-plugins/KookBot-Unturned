@@ -68,7 +68,7 @@ namespace Emqo.KookBot_Unturned.KookApi
             return JsonConvert.SerializeObject(CreateCardFromModules(modules, theme));
         }
 
-        public static string BuildChatMessageCard(string chatScope, string playerName, string content, DateTimeOffset timestamp)
+        public static string BuildChatMessageCard(string chatScope, string playerName, string content, DateTimeOffset timestamp, string statusTag = "")
         {
             playerName = string.IsNullOrWhiteSpace(playerName) ? "未知玩家" : playerName;
             content = string.IsNullOrWhiteSpace(content) ? "（空消息）" : content;
@@ -100,16 +100,29 @@ namespace Emqo.KookBot_Unturned.KookApi
 
         public static string BuildLifecycleCard(string titleEmoji, string title, string playerName, string steamId, int currentPlayers, int maxPlayers, DateTimeOffset timestamp, string theme)
         {
-            var fields = new List<(string, string)>
+            var modules = new List<object>
             {
-                ("玩家", playerName),
-                ("Steam ID", steamId),
-                ("在线人数", $"{currentPlayers}/{maxPlayers}")
+                new
+                {
+                    type = "header",
+                    text = new { type = "plain-text", content = $"{titleEmoji} {title}" }
+                },
+                new
+                {
+                    type = "section",
+                    text = new { type = "kmarkdown", content = $"**玩家**：`{playerName}`\n**Steam ID**：`{steamId}`\n**在线人数**：`{currentPlayers}/{maxPlayers}`" }
+                },
+                new
+                {
+                    type = "context",
+                    elements = new object[]
+                    {
+                        new { type = "kmarkdown", content = $"时间：`{timestamp:yyyy-MM-dd HH:mm:ss}`" }
+                    }
+                }
             };
 
-            var description = $"**玩家**：`{playerName}`\n**Steam ID**：`{steamId}`\n**在线人数**：`{currentPlayers}/{maxPlayers}`";
-
-            return BuildLifecycleCard($"{titleEmoji} {title}", description, fields, theme);
+            return JsonConvert.SerializeObject(CreateCardFromModules(modules, theme));
         }
 
         public static string BuildGenericEventCard(string emoji, string title, IEnumerable<(string Label, string Value)> fields, DateTimeOffset timestamp, string theme = "secondary")
@@ -228,7 +241,11 @@ namespace Emqo.KookBot_Unturned.KookApi
                     type = "context",
                     elements = new object[]
                     {
-                        new { type = "kmarkdown", content = footer }
+                        new
+                        {
+                            type = "kmarkdown",
+                            content = footer
+                        }
                     }
                 });
             }
@@ -251,4 +268,3 @@ namespace Emqo.KookBot_Unturned.KookApi
         }
     }
 }
-

@@ -35,6 +35,8 @@ namespace Emqo.KookBot_Unturned
         private static Dictionary<string, string> _profanityWordLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private static HashSet<string> _forbiddenWordsLower = new(StringComparer.OrdinalIgnoreCase);  // Pre-cached lowercase forbidden words
         private static List<Regex> _profanityRegexes = new List<Regex>();
+        private static readonly Dictionary<string, Regex> _profanityMaskRegexCache = new(StringComparer.OrdinalIgnoreCase);  // 缓存 Regex.Replace 的正则对象
+        private const int MaxRegexCacheSize = 100;  // 限制缓存大小，防止内存泄漏
         private static CancellationTokenSource _cleanupCancellationTokenSource;
         private static Task _cleanupTask;
 
@@ -635,6 +637,7 @@ namespace Emqo.KookBot_Unturned
                     _profanityWordLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     _forbiddenWordsLower = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     _profanityRegexes = new List<Regex>();
+                    _profanityMaskRegexCache.Clear();
                     return;
                 }
 
@@ -653,6 +656,9 @@ namespace Emqo.KookBot_Unturned
                     .Where(p => !string.IsNullOrWhiteSpace(p))
                     .Select(p => new Regex(p.Trim(), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled))
                     .ToList();
+
+                // 清空 Regex 缓存，因为脏话词库已更新
+                _profanityMaskRegexCache.Clear();
 
                 if (ShouldLogDebug)
                 {
@@ -677,23 +683,23 @@ namespace Emqo.KookBot_Unturned
             var wordLookup = _profanityWordLookup;
             var regexes = _profanityRegexes;
 
-            // Optimization: Convert to lowercase once, then use word boundaries for matching
+            // Optimization: Convert to lowercase once for all matching
+            var lowered = message.ToLowerInvariant();
+
+            // 方式1：词汇匹配 - 使用 Contains() 方法支持中文和任何语言
+            // 这样可以正确检测"你是傻逼吗"中的"傻逼"
             if (wordLookup.Count > 0)
             {
-                var lowered = message.ToLowerInvariant();
-
-                // Use word tokenization for more efficient matching
-                var words = lowered.Split(WordSeparators, StringSplitOptions.RemoveEmptyEntries);
-
-                foreach (var word in words)
+                foreach (var word in wordLookup.Keys)
                 {
-                    if (wordLookup.TryGetValue(word, out var originalWord))
+                    if (lowered.Contains(word))
                     {
-                        result.MatchedWords.Add(originalWord);
+                        result.MatchedWords.Add(wordLookup[word]);
                     }
                 }
             }
 
+            // 方式2：正则匹配
             if (regexes.Count > 0)
             {
                 foreach (var regex in regexes)
@@ -714,7 +720,19 @@ namespace Emqo.KookBot_Unturned
 
             foreach (var word in detection.MatchedWords)
             {
-                sanitized = Regex.Replace(sanitized, Regex.Escape(word), mask, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                // 使用缓存的 Regex 对象，避免每次都创建新的正则
+                var escapedWord = Regex.Escape(word);
+                if (!_profanityMaskRegexCache.TryGetValue(escapedWord, out var regex))
+                {
+                    // 检查缓存大小，防止无限增长
+                    if (_profanityMaskRegexCache.Count >= MaxRegexCacheSize)
+                    {
+                        _profanityMaskRegexCache.Clear();
+                    }
+                    regex = new Regex(escapedWord, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+                    _profanityMaskRegexCache[escapedWord] = regex;
+                }
+                sanitized = regex.Replace(sanitized, mask);
             }
 
             foreach (var regex in detection.MatchedPatterns)
