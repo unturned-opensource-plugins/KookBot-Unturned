@@ -94,7 +94,14 @@ namespace Emqo.KookBot_Unturned
                 // Wait for cleanup task with timeout instead of blocking delay
                 if (_cleanupTask != null && !_cleanupTask.IsCompleted)
                 {
-                    _cleanupTask.Wait(TimeSpan.FromSeconds(1));
+                    try
+                    {
+                        _cleanupTask.Wait(TimeSpan.FromSeconds(1));
+                    }
+                    catch (AggregateException)
+                    {
+                        // 忽略清理任务的异常，确保关闭流程继续
+                    }
                 }
 
                 // Clear all dictionaries (ConcurrentDictionary.Clear is thread-safe)

@@ -209,23 +209,26 @@ namespace Emqo.KookBot_Unturned
         }
 
         private static bool _eventsRegistered = false;
+        private static readonly object _eventsLock = new object();  // 保护 _eventsRegistered
 
         private static void RegisterEvents()
         {
-            if (_eventsRegistered)
+            lock (_eventsLock)
             {
-                Logger.LogWarning("⚠️ Events already registered, skipping...");
-                return;
-            }
+                if (_eventsRegistered)
+                {
+                    Logger.LogWarning("⚠️ Events already registered, skipping...");
+                    return;
+                }
 
-            try
-            {
-                // 玩家事件
-                U.Events.OnPlayerConnected += OnPlayerConnected;
-                U.Events.OnPlayerDisconnected += OnPlayerDisconnected;
-                UnturnedPlayerEvents.OnPlayerDeath += OnPlayerDeath;
-                UnturnedPlayerEvents.OnPlayerRevive += OnPlayerRevive;
-                UnturnedPlayerEvents.OnPlayerChatted += OnPlayerChatted;
+                try
+                {
+                    // 玩家事件
+                    U.Events.OnPlayerConnected += OnPlayerConnected;
+                    U.Events.OnPlayerDisconnected += OnPlayerDisconnected;
+                    UnturnedPlayerEvents.OnPlayerDeath += OnPlayerDeath;
+                    UnturnedPlayerEvents.OnPlayerRevive += OnPlayerRevive;
+                    UnturnedPlayerEvents.OnPlayerChatted += OnPlayerChatted;
 
                 // PvP 事件
                 DamageTool.damagePlayerRequested += OnPlayerDamaged;
@@ -238,26 +241,29 @@ namespace Emqo.KookBot_Unturned
                 Logger.LogError($"Error registering events: {ex.Message}");
                 _eventsRegistered = false;
             }
+            }  // 关闭 lock 块
         }
 
         private static void UnregisterEvents()
         {
-            if (!_eventsRegistered)
+            lock (_eventsLock)
             {
-                return;
-            }
+                if (!_eventsRegistered)
+                {
+                    return;
+                }
 
-            try
-            {
-                // 玩家事件
-                U.Events.OnPlayerConnected -= OnPlayerConnected;
-                U.Events.OnPlayerDisconnected -= OnPlayerDisconnected;
-                UnturnedPlayerEvents.OnPlayerDeath -= OnPlayerDeath;
-                UnturnedPlayerEvents.OnPlayerRevive -= OnPlayerRevive;
-                UnturnedPlayerEvents.OnPlayerChatted -= OnPlayerChatted;
+                try
+                {
+                    // 玩家事件
+                    U.Events.OnPlayerConnected -= OnPlayerConnected;
+                    U.Events.OnPlayerDisconnected -= OnPlayerDisconnected;
+                    UnturnedPlayerEvents.OnPlayerDeath -= OnPlayerDeath;
+                    UnturnedPlayerEvents.OnPlayerRevive -= OnPlayerRevive;
+                    UnturnedPlayerEvents.OnPlayerChatted -= OnPlayerChatted;
 
-                // PvP 事件
-                DamageTool.damagePlayerRequested -= OnPlayerDamaged;
+                    // PvP 事件
+                    DamageTool.damagePlayerRequested -= OnPlayerDamaged;
 
                 _eventsRegistered = false;
                 Logger.Log("✅ Events unregistered successfully");
@@ -266,6 +272,7 @@ namespace Emqo.KookBot_Unturned
             {
                 Logger.LogError($"Error unregistering events: {ex.Message}");
             }
+            }  // 关闭 lock 块
         }
 
         #region 玩家事件

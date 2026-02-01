@@ -144,7 +144,11 @@ namespace Emqo.KookBot_Unturned.Updater
 			}
 			else
 			{
-				Logger.LogWarning("AutoUpdater: No SHA256 hash provided for verification. Proceeding with caution.");
+				// 如果没有哈希，应该中止更新以确保安全
+				Logger.LogWarning("AutoUpdater: No SHA256 hash provided for verification. Update aborted for security.");
+				NotifyKook($"❌ Update aborted: No integrity hash provided for {tag}");
+				try { File.Delete(tempPath); } catch { }
+				return;
 			}
 
 			var dllPath = GetPluginDllPath();

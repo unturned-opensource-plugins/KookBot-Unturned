@@ -121,39 +121,50 @@ namespace Emqo.KookBot_Unturned
 
         protected override async void Unload()
         {
-            if (Configuration.Instance.IsGameToKookEnabled("ServerStart"))
-            {
-                try
-                {
-                    var card = KookApi.KookCardFactory.BuildLifecycleCard(
-                        $"{Configuration.Instance.ServerName} 已关闭",
-                        $"🔴 服务器已下线",
-                        new[]
-                        {
-                            ("关闭时间", $"`{DateTime.Now:yyyy-MM-dd HH:mm:ss}`"),
-                            ("运行时长", $"`{GetUptime():hh\\:mm\\:ss}`")
-                        },
-                        "danger"
-                    );
-                    await _kookMessageApi.CreateMessageAsync(10, Configuration.Instance.ChannelId, card);
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"❌ Failed to send server stop message to KOOK: {ex.Message}");
-                }
-            }
-
-            await _client.StopAsync();
-            ConfigurationHotReloadService.Stop();
             try
             {
-                AutoUpdaterService.Stop();
-            }
-            catch { }
+                if (Configuration.Instance.IsGameToKookEnabled("ServerStart"))
+                {
+                    try
+                    {
+                        var card = KookApi.KookCardFactory.BuildLifecycleCard(
+                            $"{Configuration.Instance.ServerName} 已关闭",
+                            $"🔴 服务器已下线",
+                            new[]
+                            {
+                                ("关闭时间", $"`{DateTime.Now:yyyy-MM-dd HH:mm:ss}`"),
+                                ("运行时长", $"`{GetUptime():hh\\:mm\\:ss}`")
+                            },
+                            "danger"
+                        );
+                        await _kookMessageApi.CreateMessageAsync(10, Configuration.Instance.ChannelId, card);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"❌ Failed to send server stop message to KOOK: {ex.Message}");
+                    }
+                }
 
-            Events.Shutdown();
-            ChatModerationManager.Shutdown();
-            Logger.Log("📤 Server stop event sent to KOOK");
+                if (_client != null)
+                {
+                    await _client.StopAsync();
+                }
+
+                ConfigurationHotReloadService.Stop();
+                try
+                {
+                    AutoUpdaterService.Stop();
+                }
+                catch { }
+
+                Events.Shutdown();
+                ChatModerationManager.Shutdown();
+                Logger.Log("📤 Server stop event sent to KOOK");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error during plugin unload: {ex.Message}");
+            }
         }
 
         public override TranslationList DefaultTranslations => new()

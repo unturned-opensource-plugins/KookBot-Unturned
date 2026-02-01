@@ -10,7 +10,7 @@ namespace Emqo.KookBot_Unturned
     internal static class ConfigurationHotReloadService
     {
         private const int DebounceDelayMs = 750;
-        private static readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
+        private static SemaphoreSlim _semaphore;  // 改为非 readonly，允许重新创建
         private static FileSystemWatcher _watcher;
         private static string _configPath;
         private static CancellationTokenSource _debounceCts;
@@ -29,6 +29,9 @@ namespace Emqo.KookBot_Unturned
             _configPath = configPath;
             var directory = Path.GetDirectoryName(configPath);
             var fileName = Path.GetFileName(configPath);
+
+            // 创建新的 SemaphoreSlim 实例
+            _semaphore = new SemaphoreSlim(1, 1);
 
             _watcher = new FileSystemWatcher(directory ?? ".", fileName)
             {
@@ -68,8 +71,9 @@ namespace Emqo.KookBot_Unturned
                 _watcher.Dispose();
                 _watcher = null;
 
-                // Dispose SemaphoreSlim to release resources
+                // 释放旧的 SemaphoreSlim，下次 Start() 时会创建新实例
                 _semaphore?.Dispose();
+                _semaphore = null;
 
                 Logger.Log("🛑 Configuration hot reload stopped.");
             }
@@ -87,6 +91,12 @@ namespace Emqo.KookBot_Unturned
 
         private static async Task OnFileChangedAsync()
         {
+            // 检查 _semaphore 是否已被释放
+            if (_semaphore == null)
+            {
+                return;
+            }
+
             // Cancel any pending debounced reload before acquiring semaphore
             CancellationToken cancellationToken;
             lock (_debounceLock)

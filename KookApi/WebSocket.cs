@@ -92,6 +92,7 @@ public class KookWebSocketClient
         {
             _cancellationTokenSource?.Dispose();
             _cancellationTokenSource = null;
+            _reconnectSemaphore?.Dispose();  // 释放 SemaphoreSlim
         }
     }
 
