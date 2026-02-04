@@ -568,28 +568,17 @@ namespace Emqo.KookBot_Unturned
         {
             try
             {
-                // 使用同步快速路径检查禁言状态
+                // Check if player is muted
                 if (ChatModerationManager.IsMutedSync(player.CSteamID))
                 {
                     cancel = true;
                     return;
                 }
 
-                // 检查速率限制
-                if (ChatModerationManager.IsRateLimitedSync(player.CSteamID))
-                {
-                    cancel = true;
-                    Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
-                    {
-                        UnturnedChat.Say(player, Config?.Moderation?.MinIntervalWarningMessage ?? "Speaking too fast.", UnityEngine.Color.red);
-                    });
-                    return;
-                }
-
-                // 在同步上下文中获取玩家名称
+                // Get player name in sync context
                 var playerName = GetPlayerName(player);
 
-                // Async process full moderation with exception handling
+                // Async process moderation with exception handling
                 SafeFireAndForget(ProcessChatMessageAsync(player, playerName, message, chatMode), "ChatModeration");
             }
             catch (Exception ex)
@@ -624,27 +613,13 @@ namespace Emqo.KookBot_Unturned
                             SafeFireAndForget(SendAutoMuteNotificationAsync(playerName, moderationResult.AppliedMute), "AutoMuteNotification");
                         }
 
-                        // 即使消息被拒绝，也发送过滤后的版本到 Kook
-                        var filteredMessage = moderationResult.SanitizedMessage ?? "**";
-                        if (_isEnabled && _message != null && Config != null && Config.IsGameToKookEnabled("ChatMessage"))
-                        {
-                            SafeFireAndForget(SendChatMessageAsync(playerName, filteredMessage, chatMode, isFiltered: true), "SendChatMessage");
-                        }
-
                         return;
                     }
 
-                    var processedMessage = moderationResult.SanitizedMessage ?? message;
-
-                    if (!string.IsNullOrWhiteSpace(moderationResult.ModerationLog) && ShouldLogDebug)
-                    {
-                        Logger.LogWarning($"⚠️ {moderationResult.ModerationLog}");
-                    }
-
-                    // 检查事件是否启用
+                    // Check if event is enabled
                     if (_isEnabled && _message != null && Config != null && Config.IsGameToKookEnabled("ChatMessage"))
                     {
-                        SafeFireAndForget(SendChatMessageAsync(playerName, processedMessage, chatMode, isFiltered: false), "SendChatMessage");
+                        SafeFireAndForget(SendChatMessageAsync(playerName, message, chatMode, isFiltered: false), "SendChatMessage");
                     }
                 });
             }

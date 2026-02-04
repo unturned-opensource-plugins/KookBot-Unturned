@@ -79,6 +79,18 @@ namespace Emqo.KookBot_Unturned
                     await HandleStatusCommand(channelId);
                     break;
 
+                case "mute":
+                    await HandleMuteCommand(nickname, args, id, channelId, isAdmin);
+                    break;
+
+                case "unmute":
+                    await HandleUnmuteCommand(nickname, args, id, channelId, isAdmin);
+                    break;
+
+                case "mutes":
+                    await HandleMutesCommand(id, channelId, isAdmin);
+                    break;
+
                 case "cmd":
                 case "console":
                 case "exec":
@@ -183,6 +195,11 @@ namespace Emqo.KookBot_Unturned
                     helpText.Append("`/say <内容>` - 服务器广播消息\n");
                 if (Config.IsCommandEnabled("cmd") || Config.IsCommandEnabled("console") || Config.IsCommandEnabled("exec"))
                     helpText.Append("`/cmd <指令>` - 执行控制台指令\n");
+
+                helpText.Append("\n**🔐 禁言管理：**\n");
+                helpText.Append("`/mute <玩家> [分钟] [原因]` - 禁言玩家\n");
+                helpText.Append("`/unmute <玩家>` - 解除禁言\n");
+                helpText.Append("`/mutes` - 查看禁言列表\n");
             }
             else
             {
@@ -320,6 +337,266 @@ namespace Emqo.KookBot_Unturned
             {
                 Logger.LogError($"Failed to handle /status command: {ex.Message}");
                 await _message.CreateMessageAsync(9, channelId, "❌ 无法获取服务器状态，请稍后再试");
+            }
+        }
+
+        private static async Task HandleMuteCommand(string nickname, string args, string id, string channelId, bool isAdmin)
+        {
+            if (!isAdmin)
+            {
+                await CheckAdminPermissionAsync(id, channelId, "mute");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(args))
+            {
+                var usageCard = BuildWarningCard("用法错误", "`/mute <玩家> [分钟] [原因]`");
+                await _message.CreateMessageAsync(10, channelId, usageCard);
+                return;
+            }
+
+            try
+            {
+                var parts = args.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0)
+                {
+                    var usageCard = BuildWarningCard("用法错误", "`/mute <玩家> [分钟] [原因]`");
+                    await _message.CreateMessageAsync(10, channelId, usageCard);
+                    return;
+                }
+
+                var playerName = parts[0];
+                int? durationMinutes = null;
+                string reason = "Admin mute";
+
+                // 解析可选的时长参数
+                if (parts.Length > 1 && int.TryParse(parts[1], out var minutes))
+                {
+                    durationMinutes = minutes;
+                    if (parts.Length > 2)
+                    {
+                        reason = string.Join(" ", parts.Skip(2));
+                    }
+                }
+                else if (parts.Length > 1)
+                {
+                    reason = string.Join(" ", parts.Skip(1));
+                }
+
+                // 在主线程中查找玩家并执行禁言
+                var muteResult = await Task.Run(() =>
+                {
+                    var tcs = new TaskCompletionSource<(bool success, string message, MuteInfo muteInfo)>();
+                    Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                    {
+                        try
+                        {
+                            var player = PlayerTool.getPlayer(playerName);
+                            if (player == null)
+                            {
+                                tcs.TrySetResult((false, $"找不到玩家：{playerName}", null));
+                                return;
+                            }
+
+                            var unturnedPlayer = UnturnedPlayer.FromPlayer(player);
+                            if (unturnedPlayer == null)
+                            {
+                                tcs.TrySetResult((false, $"无法获取玩家信息：{playerName}", null));
+                                return;
+                            }
+
+                            var duration = durationMinutes.HasValue ? TimeSpan.FromMinutes(durationMinutes.Value) : (TimeSpan?)null;
+                            if (ChatModerationManager.TryMutePlayer(unturnedPlayer, duration, reason, nickname, out var muteInfo))
+                            {
+                                var durationText = muteInfo.GetDurationDescription();
+                                tcs.TrySetResult((true, $"已禁言玩家 {unturnedPlayer.DisplayName}（{durationText}）", muteInfo));
+                            }
+                            else
+                            {
+                                tcs.TrySetResult((false, $"禁言玩家失败：{playerName}", null));
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            tcs.TrySetResult((false, $"错误：{ex.Message}", null));
+                        }
+                    });
+
+                    return tcs.Task.Result;
+                });
+
+                if (muteResult.success)
+                {
+                    var successBody = new StringBuilder()
+                        .AppendLine($"**玩家**：{muteResult.muteInfo.PlayerName}")
+                        .AppendLine($"**时长**：{muteResult.muteInfo.GetDurationDescription()}")
+                        .AppendLine($"**原因**：{muteResult.muteInfo.Reason}")
+                        .AppendLine($"**操作者**：{nickname}")
+                        .ToString();
+                    var successCard = KookCardFactory.BuildMarkdownCard("🚫", "玩家已禁言", successBody, DateTimeOffset.Now, "warning");
+                    await _message.CreateMessageAsync(10, channelId, successCard);
+
+                    if (ShouldLogDebug())
+                    {
+                        Logger.Log($"🚫 {nickname} muted {muteResult.muteInfo.PlayerName} for {muteResult.muteInfo.GetDurationDescription()}");
+                    }
+                }
+                else
+                {
+                    var errorCard = BuildErrorCard("禁言失败", muteResult.message);
+                    await _message.CreateMessageAsync(10, channelId, errorCard);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error executing mute command: {ex.Message}");
+                var errorCard = BuildErrorCard("执行错误", $"`{ex.Message}`");
+                await _message.CreateMessageAsync(10, channelId, errorCard);
+            }
+        }
+
+        private static async Task HandleUnmuteCommand(string nickname, string args, string id, string channelId, bool isAdmin)
+        {
+            if (!isAdmin)
+            {
+                await CheckAdminPermissionAsync(id, channelId, "unmute");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(args))
+            {
+                var usageCard = BuildWarningCard("用法错误", "`/unmute <玩家>`");
+                await _message.CreateMessageAsync(10, channelId, usageCard);
+                return;
+            }
+
+            try
+            {
+                var playerName = args.Trim();
+
+                // 在主线程中执行解除禁言
+                var unmuteResult = await Task.Run(() =>
+                {
+                    var tcs = new TaskCompletionSource<(bool success, string message, MuteInfo muteInfo)>();
+                    Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                    {
+                        try
+                        {
+                            if (ChatModerationManager.TryUnmutePlayer(playerName, out var muteInfo))
+                            {
+                                tcs.TrySetResult((true, $"已解除禁言：{muteInfo.PlayerName}", muteInfo));
+                            }
+                            else
+                            {
+                                tcs.TrySetResult((false, $"找不到禁言记录：{playerName}", null));
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            tcs.TrySetResult((false, $"错误：{ex.Message}", null));
+                        }
+                    });
+
+                    return tcs.Task.Result;
+                });
+
+                if (unmuteResult.success)
+                {
+                    var successBody = new StringBuilder()
+                        .AppendLine($"**玩家**：{unmuteResult.muteInfo.PlayerName}")
+                        .AppendLine($"**原因**：{unmuteResult.muteInfo.Reason}")
+                        .AppendLine($"**操作者**：{nickname}")
+                        .ToString();
+                    var successCard = KookCardFactory.BuildMarkdownCard("✅", "禁言已解除", successBody, DateTimeOffset.Now, "success");
+                    await _message.CreateMessageAsync(10, channelId, successCard);
+
+                    if (ShouldLogDebug())
+                    {
+                        Logger.Log($"✅ {nickname} unmuted {unmuteResult.muteInfo.PlayerName}");
+                    }
+                }
+                else
+                {
+                    var errorCard = BuildErrorCard("解除禁言失败", unmuteResult.message);
+                    await _message.CreateMessageAsync(10, channelId, errorCard);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error executing unmute command: {ex.Message}");
+                var errorCard = BuildErrorCard("执行错误", $"`{ex.Message}`");
+                await _message.CreateMessageAsync(10, channelId, errorCard);
+            }
+        }
+
+        private static async Task HandleMutesCommand(string id, string channelId, bool isAdmin)
+        {
+            if (!isAdmin)
+            {
+                await CheckAdminPermissionAsync(id, channelId, "mutes");
+                return;
+            }
+
+            try
+            {
+                // 在主线程中获取禁言列表
+                var mutes = await Task.Run(() =>
+                {
+                    var tcs = new TaskCompletionSource<IReadOnlyCollection<MuteInfo>>();
+                    Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                    {
+                        try
+                        {
+                            var activeMutes = ChatModerationManager.GetActiveMutes();
+                            tcs.TrySetResult(activeMutes);
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogError($"Error getting mutes: {ex.Message}");
+                            tcs.TrySetResult(new List<MuteInfo>());
+                        }
+                    });
+
+                    return tcs.Task.Result;
+                });
+
+                if (mutes.Count == 0)
+                {
+                    var emptyCard = BuildInfoCard("禁言列表", "当前没有被禁言的玩家");
+                    await _message.CreateMessageAsync(10, channelId, emptyCard);
+                    return;
+                }
+
+                var mutesList = new StringBuilder();
+                mutesList.AppendLine($"**当前禁言数**：{mutes.Count}\n");
+
+                foreach (var mute in mutes.Take(10))
+                {
+                    mutesList.AppendLine($"• **{mute.PlayerName}**");
+                    mutesList.AppendLine($"  时长：{mute.GetDurationDescription()}");
+                    mutesList.AppendLine($"  原因：{mute.Reason}");
+                    mutesList.AppendLine($"  操作者：{mute.MutedBy}");
+                    mutesList.AppendLine();
+                }
+
+                if (mutes.Count > 10)
+                {
+                    mutesList.AppendLine($"... 还有 {mutes.Count - 10} 条记录");
+                }
+
+                var listCard = KookCardFactory.BuildMarkdownCard("📋", "禁言列表", mutesList.ToString(), DateTimeOffset.Now, "info");
+                await _message.CreateMessageAsync(10, channelId, listCard);
+
+                if (ShouldLogDebug())
+                {
+                    Logger.Log($"📋 {id} viewed mutes list ({mutes.Count} active)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error executing mutes command: {ex.Message}");
+                var errorCard = BuildErrorCard("执行错误", $"`{ex.Message}`");
+                await _message.CreateMessageAsync(10, channelId, errorCard);
             }
         }
 
