@@ -10,7 +10,6 @@ using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using Emqo.KookBot_Unturned.Monitoring;
-using Emqo.KookBot_Unturned.Updater;
 using Emqo.KookBot_Unturned.Interfaces;
 
 namespace Emqo.KookBot_Unturned
@@ -66,17 +65,6 @@ namespace Emqo.KookBot_Unturned
 
                 Logger.Log("🔍 Initializing Events system...");
                 Events.Initialize(_kookMessageApi, Configuration.Instance.ChannelId, _configProvider);
-
-                // Start auto updater if enabled
-                try
-                {
-                    Logger.Log("🔍 Starting AutoUpdaterService...");
-                    AutoUpdaterService.Start();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"AutoUpdater start failed: {ex.Message}");
-                }
 
                 Logger.Log("🔍 Getting bot info from Kook API...");
                 try
@@ -187,12 +175,6 @@ namespace Emqo.KookBot_Unturned
                 }
 
                 ConfigurationHotReloadService.Stop();
-                try
-                {
-                    AutoUpdaterService.Stop();
-                }
-                catch { }
-
                 Events.Shutdown();
                 ChatModerationManager.Shutdown();
                 Logger.Log("✅ Plugin unloaded successfully");

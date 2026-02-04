@@ -26,6 +26,7 @@ namespace Emqo.KookBot_Unturned
         {
             "help",
             "status",
+            "list",
             "say",
             "cmd",
             "console",
@@ -39,13 +40,6 @@ namespace Emqo.KookBot_Unturned
         public string MessagePrefix { get; set; }
         public bool KookToGame { get; set; }
         public bool ExposeReviveCoordinates { get; set; }
-        // Auto Update
-        public bool AutoUpdateEnabled { get; set; }
-        public bool AutoRestartAfterUpdate { get; set; }
-        public string UpdateRepoOwner { get; set; }
-        public string UpdateRepoName { get; set; }
-        public bool IncludePrereleases { get; set; }
-        public int UpdateCheckIntervalMinutes { get; set; }
 
         public List<SettingItem> GameToKookSettings { get; set; }
         public List<SettingItem> CommandSettings { get; set; }
@@ -79,12 +73,6 @@ namespace Emqo.KookBot_Unturned
             KookToGame = true;
             Debug = false;
             ExposeReviveCoordinates = false;
-            AutoUpdateEnabled = false;
-            AutoRestartAfterUpdate = false;
-            UpdateRepoOwner = "Emqo";
-            UpdateRepoName = "KookBot-Unturned";
-            IncludePrereleases = false;
-            UpdateCheckIntervalMinutes = 60;
 
             GameToKook = NormalizeSettings(null, DefaultGameEventKeys);
             Commands = NormalizeSettings(null, DefaultCommandKeys);
@@ -182,12 +170,6 @@ namespace Emqo.KookBot_Unturned
             KookToGame = source.KookToGame;
             Debug = source.Debug;
             ExposeReviveCoordinates = source.ExposeReviveCoordinates;
-            AutoUpdateEnabled = source.AutoUpdateEnabled;
-            AutoRestartAfterUpdate = source.AutoRestartAfterUpdate;
-            UpdateRepoOwner = string.IsNullOrWhiteSpace(source.UpdateRepoOwner) ? "Emqo" : source.UpdateRepoOwner;
-            UpdateRepoName = string.IsNullOrWhiteSpace(source.UpdateRepoName) ? "KookBot-Unturned" : source.UpdateRepoName;
-            IncludePrereleases = source.IncludePrereleases;
-            UpdateCheckIntervalMinutes = source.UpdateCheckIntervalMinutes > 0 ? source.UpdateCheckIntervalMinutes : 60;
 
             Admin = source.Admin != null
                 ? new List<string>(source.Admin)
