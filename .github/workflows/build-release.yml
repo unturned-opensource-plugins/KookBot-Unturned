@@ -34,7 +34,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        ref: ${{ github.event_name == 'workflow_dispatch' && 'master' || steps.get_version.outputs.TAG }}
+        ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || steps.get_version.outputs.TAG }}
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
@@ -70,10 +70,9 @@ jobs:
         $notes += "## Features`n`n"
         $notes += "### Core Features`n"
         $notes += "- **Bidirectional Sync**: Game server events sync to Kook channel and vice versa`n"
-        $notes += "- **Server Management**: Execute commands from Kook (/help, /status, /say, /cmd)`n"
+        $notes += "- **Server Management**: Execute commands from Kook (/help, /status, /list, /say, /cmd)`n"
         $notes += "- **Rich Card Messages**: All notifications use Kook card format for better display`n"
         $notes += "- **Chat Moderation**: Rate limiting, spam detection, profanity filter`n"
-        $notes += "- **Auto Update**: Automatic updates from GitHub Releases`n"
         $notes += "- **Hot Reload**: Configuration changes apply without restart`n`n"
         $notes += "## Installation`n`n"
         $notes += "1. Copy ``KookBot-Unturned.dll`` to ``Rocket/Plugins/``n"
