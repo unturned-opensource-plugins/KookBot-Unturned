@@ -45,9 +45,14 @@ namespace Emqo.KookBot_Unturned.Detectors
 
         public Task<DetectionResult> DetectAsync(UnturnedPlayer player, string message)
         {
+            return Task.FromResult(DetectSync(player, message));
+        }
+
+        public DetectionResult DetectSync(UnturnedPlayer player, string message)
+        {
             if (!_isEnabled || player == null)
             {
-                return Task.FromResult(DetectionResult.Allowed());
+                return DetectionResult.Allowed();
             }
 
             var steamId = player.CSteamID;
@@ -62,18 +67,18 @@ namespace Emqo.KookBot_Unturned.Detectors
                     // Update the last message time even on violation to prevent spam
                     _lastMessageTimes[steamId] = now;
 
-                    return Task.FromResult(DetectionResult.Violation(
+                    return DetectionResult.Violation(
                         Name,
                         _warningMessage,
                         shouldAutoMute: false
-                    ));
+                    );
                 }
             }
 
             // Update last message time
             _lastMessageTimes[steamId] = now;
 
-            return Task.FromResult(DetectionResult.Allowed());
+            return DetectionResult.Allowed();
         }
 
         public void Shutdown()

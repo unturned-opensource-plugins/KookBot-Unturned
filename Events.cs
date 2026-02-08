@@ -568,18 +568,30 @@ namespace Emqo.KookBot_Unturned
         {
             try
             {
-                // Check if player is muted
-                if (ChatModerationManager.IsMutedSync(player.CSteamID))
+                // 同步检测消息是否违规（禁言、违禁词、速率限制等）
+                var moderationResult = ChatModerationManager.EvaluateMessageSync(player, message);
+                if (!moderationResult.IsAllowed)
                 {
                     cancel = true;
+
+                    // 通知玩家
+                    if (!string.IsNullOrEmpty(moderationResult.DenyReason))
+                    {
+                        UnturnedChat.Say(player, moderationResult.DenyReason, UnityEngine.Color.red);
+                    }
+
+                    if (ShouldLogDebug)
+                    {
+                        Logger.Log($"🚫 Message blocked: {GetPlayerName(player)} - {moderationResult.BlockReason}");
+                    }
                     return;
                 }
 
                 // Get player name in sync context
                 var playerName = GetPlayerName(player);
 
-                // Async process moderation with exception handling
-                SafeFireAndForget(ProcessChatMessageAsync(player, playerName, message, chatMode), "ChatModeration");
+                // Async forward to Kook (non-blocking)
+                SafeFireAndForget(ForwardChatToKookAsync(player, playerName, message, chatMode), "ChatForward");
             }
             catch (Exception ex)
             {
@@ -588,44 +600,21 @@ namespace Emqo.KookBot_Unturned
             }
         }
 
-        private static async Task ProcessChatMessageAsync(UnturnedPlayer player, string playerName, string message, EChatMode chatMode)
+        private static async Task ForwardChatToKookAsync(UnturnedPlayer player, string playerName, string message, EChatMode chatMode)
         {
             try
             {
-                var moderationResult = await ChatModerationManager.EvaluateMessageAsync(player, message);
-
-                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                // Check if event is enabled
+                if (!_isEnabled || _message == null || Config == null || !Config.IsGameToKookEnabled("ChatMessage"))
                 {
-                    if (!moderationResult.IsAllowed)
-                    {
-                        if (!string.IsNullOrWhiteSpace(moderationResult.DenyReason))
-                        {
-                            UnturnedChat.Say(player, moderationResult.DenyReason, UnityEngine.Color.red);
-                        }
+                    return;
+                }
 
-                        if (!string.IsNullOrWhiteSpace(moderationResult.BlockReason) && ShouldLogDebug)
-                        {
-                            Logger.LogWarning($"🚫 {moderationResult.BlockReason}");
-                        }
-
-                        if (moderationResult.WasAutoMute && moderationResult.AppliedMute != null)
-                        {
-                            SafeFireAndForget(SendAutoMuteNotificationAsync(playerName, moderationResult.AppliedMute), "AutoMuteNotification");
-                        }
-
-                        return;
-                    }
-
-                    // Check if event is enabled
-                    if (_isEnabled && _message != null && Config != null && Config.IsGameToKookEnabled("ChatMessage"))
-                    {
-                        SafeFireAndForget(SendChatMessageAsync(playerName, message, chatMode, isFiltered: false), "SendChatMessage");
-                    }
-                });
+                await SendChatMessageAsync(playerName, message, chatMode, isFiltered: false);
             }
             catch (Exception ex)
             {
-                Logger.LogError($"Error processing chat message: {ex.Message}");
+                Logger.LogError($"Error forwarding chat to Kook: {ex.Message}");
             }
         }
 

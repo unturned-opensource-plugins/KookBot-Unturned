@@ -29,6 +29,14 @@ namespace Emqo.KookBot_Unturned.Detectors
         Task<DetectionResult> DetectAsync(UnturnedPlayer player, string message);
 
         /// <summary>
+        /// Synchronously evaluate a message for violations (for blocking chat events).
+        /// </summary>
+        /// <param name="player">The player who sent the message.</param>
+        /// <param name="message">The message content.</param>
+        /// <returns>Detection result indicating if a violation was found.</returns>
+        DetectionResult DetectSync(UnturnedPlayer player, string message);
+
+        /// <summary>
         /// Initialize the detector with configuration.
         /// </summary>
         /// <param name="config">The moderation configuration.</param>

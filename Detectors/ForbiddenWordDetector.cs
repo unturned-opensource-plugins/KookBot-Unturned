@@ -65,9 +65,14 @@ namespace Emqo.KookBot_Unturned.Detectors
 
         public Task<DetectionResult> DetectAsync(UnturnedPlayer player, string message)
         {
+            return Task.FromResult(DetectSync(player, message));
+        }
+
+        public DetectionResult DetectSync(UnturnedPlayer player, string message)
+        {
             if (!_isEnabled || player == null || string.IsNullOrWhiteSpace(message))
             {
-                return Task.FromResult(DetectionResult.Allowed());
+                return DetectionResult.Allowed();
             }
 
             // Get a snapshot of the forbidden words
@@ -76,7 +81,7 @@ namespace Emqo.KookBot_Unturned.Detectors
             {
                 if (_forbiddenWordsLower.Count == 0)
                 {
-                    return Task.FromResult(DetectionResult.Allowed());
+                    return DetectionResult.Allowed();
                 }
                 wordsSnapshot = new HashSet<string>(_forbiddenWordsLower, StringComparer.OrdinalIgnoreCase);
             }
@@ -91,16 +96,16 @@ namespace Emqo.KookBot_Unturned.Detectors
                         ? TimeSpan.FromSeconds(_autoMuteSeconds)
                         : (TimeSpan?)null;
 
-                    return Task.FromResult(DetectionResult.Violation(
+                    return DetectionResult.Violation(
                         Name,
                         _warningMessage,
                         shouldAutoMute: _autoMuteEnabled,
                         autoMuteDuration: muteDuration
-                    ));
+                    );
                 }
             }
 
-            return Task.FromResult(DetectionResult.Allowed());
+            return DetectionResult.Allowed();
         }
 
         public void Shutdown()
