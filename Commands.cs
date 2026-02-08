@@ -17,7 +17,6 @@ namespace Emqo.KookBot_Unturned
 {
     internal static class Commands
     {
-        private const int MaxCommandOutputLength = 900;  // Maximum length for command output
         private static Message _message;
 
         // 配置属性快捷访问
@@ -237,87 +236,65 @@ namespace Emqo.KookBot_Unturned
 
             try
             {
-                // Add timeout protection (30 seconds)
-                using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+                var executed = false;
+                var exception = (Exception)null;
+
+                // 在主线程执行命令
+                var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
                 {
                     try
                     {
-                        var output = await CommandOutputInterceptor.CaptureAsync(async () =>
-                        {
-                            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                            Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
-                            {
-                                try
-                                {
-                                    Commander.execute(CSteamID.Nil, args);
-                                    tcs.TrySetResult(true);
-                                }
-                                catch (Exception execEx)
-                                {
-                                    tcs.TrySetException(execEx);
-                                }
-                            });
-
-                            // Wait with timeout using Task.WhenAny
-                            var delayTask = Task.Delay(Timeout.Infinite, cts.Token);
-                            var completedTask = await Task.WhenAny(tcs.Task, delayTask).ConfigureAwait(false);
-
-                            if (completedTask == delayTask)
-                            {
-                                throw new OperationCanceledException("Command execution timeout");
-                            }
-
-                            await tcs.Task.ConfigureAwait(false);
-                        });
-
-                        if (ShouldLogDebug())
-                        {
-                            Logger.Log($"🔧 Console command executed by {id}: {args}");
-                        }
-
-                        var successBody = BuildCommandResultBody(args, output);
-                        var successCard = KookCardFactory.BuildMarkdownCard(
-                            "🛠️",
-                            "指令执行成功",
-                            successBody,
-                            DateTimeOffset.Now,
-                            "success"
-                        );
-
-                        await _message.CreateMessageAsync(10, channelId, successCard);
+                        Commander.execute(CSteamID.Nil, args);
+                        executed = true;
+                        tcs.TrySetResult(true);
                     }
-                    catch (OperationCanceledException)
+                    catch (Exception ex)
                     {
-                        Logger.LogWarning($"Console command timeout for {id}: {args}");
-                        var timeoutBody = new StringBuilder()
-                            .AppendLine($"**指令**：`{args}`")
-                            .AppendLine("**错误**：`指令执行超时（30秒）`")
-                            .ToString();
-                        var timeoutCard = KookCardFactory.BuildMarkdownCard(
-                            "⏱️",
-                            "指令执行超时",
-                            timeoutBody,
-                            DateTimeOffset.Now,
-                            "warning"
-                        );
-                        await _message.CreateMessageAsync(10, channelId, timeoutCard);
+                        exception = ex;
+                        tcs.TrySetResult(false);
                     }
+                });
+
+                // 等待执行完成，最多30秒
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30));
+                var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
+
+                if (completedTask == timeoutTask)
+                {
+                    var timeoutCard = BuildWarningCard("指令执行超时", $"**指令**：`{args}`\n**错误**：执行超时（30秒）");
+                    await _message.CreateMessageAsync(10, channelId, timeoutCard);
+                    return;
+                }
+
+                if (exception != null)
+                {
+                    var errorCard = BuildErrorCard("指令执行失败", $"**指令**：`{args}`\n**错误**：`{exception.Message}`");
+                    await _message.CreateMessageAsync(10, channelId, errorCard);
+                    return;
+                }
+
+                if (executed)
+                {
+                    if (ShouldLogDebug())
+                    {
+                        Logger.Log($"🔧 Console command executed by {id}: {args}");
+                    }
+
+                    var successCard = KookCardFactory.BuildMarkdownCard(
+                        "✅",
+                        "指令执行成功",
+                        $"**指令**：`{args}`",
+                        DateTimeOffset.Now,
+                        "success"
+                    );
+                    await _message.CreateMessageAsync(10, channelId, successCard);
                 }
             }
             catch (Exception ex)
             {
                 Logger.LogError($"Error executing console command: {ex.Message}");
-                var failureBody = new StringBuilder()
-                    .AppendLine($"**指令**：`{args}`")
-                    .AppendLine($"**错误**：`{ex.Message}`")
-                    .ToString();
-                var failureCard = KookCardFactory.BuildMarkdownCard(
-                    "❌",
-                    "指令执行失败",
-                    failureBody,
-                    DateTimeOffset.Now,
-                    "danger"
-                );
+                var failureCard = BuildErrorCard("执行错误", $"**指令**：`{args}`\n**错误**：`{ex.Message}`");
                 await _message.CreateMessageAsync(10, channelId, failureCard);
             }
         }
@@ -733,26 +710,6 @@ namespace Emqo.KookBot_Unturned
             return KookCardFactory.BuildMarkdownCard("✅", title, body, DateTimeOffset.Now, "success");
         }
 
-        private static string BuildCommandResultBody(string args, string output)
-        {
-            var builder = new StringBuilder();
-            builder.AppendLine($"**指令**：`{args}`");
-
-            if (!string.IsNullOrWhiteSpace(output))
-            {
-                builder.AppendLine("**输出：**");
-                builder.AppendLine("```");
-                builder.AppendLine(SanitizeCommandOutput(output));
-                builder.AppendLine("```");
-            }
-            else
-            {
-                builder.AppendLine("**输出**：`(无)`");
-            }
-
-            return builder.ToString();
-        }
-
         private static string SanitizeRichText(string input)
         {
             if (string.IsNullOrEmpty(input))
@@ -767,25 +724,6 @@ namespace Emqo.KookBot_Unturned
                 .Replace("[", "［")
                 .Replace("]", "］")
                 .Replace("\\", "＼");
-        }
-
-        private static string SanitizeCommandOutput(string raw)
-        {
-            if (string.IsNullOrWhiteSpace(raw))
-            {
-                return string.Empty;
-            }
-
-            var trimmed = raw.Trim();
-
-            // Security: Truncate output to prevent information disclosure
-            if (trimmed.Length > MaxCommandOutputLength)
-            {
-                Logger.LogWarning($"⚠️ Command output exceeded max length ({trimmed.Length} > {MaxCommandOutputLength}), truncating");
-                trimmed = trimmed.Substring(0, MaxCommandOutputLength) + "...";
-            }
-
-            return trimmed.Replace("```", "`\u200b``");
         }
 
         private static bool ShouldLogDebug()
