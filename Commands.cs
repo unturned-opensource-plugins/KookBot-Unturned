@@ -245,7 +245,29 @@ namespace Emqo.KookBot_Unturned
                 {
                     try
                     {
-                        Commander.execute(CSteamID.Nil, args);
+                        // 直接调用 Commander.commands 解析并执行
+                        // 这样可以正确处理带空格的参数
+                        bool wasHandled = false;
+                        var lowerArgs = args.ToLower();
+
+                        foreach (var cmd in Commander.commands)
+                        {
+                            if (lowerArgs.StartsWith(cmd.command.ToLower()))
+                            {
+                                var cmdLen = cmd.command.Length;
+                                var parameter = args.Length > cmdLen ? args.Substring(cmdLen).TrimStart() : "";
+                                cmd.check(CSteamID.Nil, cmd.command, parameter);
+                                wasHandled = true;
+                                break;
+                            }
+                        }
+
+                        if (!wasHandled)
+                        {
+                            // 回退到默认方式
+                            Commander.execute(CSteamID.Nil, args);
+                        }
+
                         executed = true;
                         tcs.TrySetResult(true);
                     }
