@@ -30,7 +30,10 @@ namespace Emqo.KookBot_Unturned
             "say",
             "cmd",
             "console",
-            "exec"
+            "exec",
+            "mute",
+            "unmute",
+            "mutes"
         };
 
         public string ServerName { get; set; }
