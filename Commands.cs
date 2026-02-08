@@ -245,29 +245,24 @@ namespace Emqo.KookBot_Unturned
                 {
                     try
                     {
-                        // 直接调用 Commander.commands 解析并执行
-                        // 这样可以正确处理带空格的参数
-                        bool wasHandled = false;
-                        var lowerArgs = args.ToLower();
+                        // Unturned 控制台命令使用 / 分隔参数
+                        // 例如: "give ff 76 5" -> "give ff/76/5"
+                        var parts = args.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                        string fullCommand;
 
-                        foreach (var cmd in Commander.commands)
+                        if (parts.Length <= 1)
                         {
-                            if (lowerArgs.StartsWith(cmd.command.ToLower()))
-                            {
-                                var cmdLen = cmd.command.Length;
-                                var parameter = args.Length > cmdLen ? args.Substring(cmdLen).TrimStart() : "";
-                                cmd.check(CSteamID.Nil, cmd.command, parameter);
-                                wasHandled = true;
-                                break;
-                            }
+                            // 无参数或只有命令名
+                            fullCommand = args;
+                        }
+                        else
+                        {
+                            // 命令名 + 第一个参数 + 其余参数用/分隔
+                            // give ff 76 5 -> give ff/76/5
+                            fullCommand = parts[0] + " " + string.Join("/", parts.Skip(1));
                         }
 
-                        if (!wasHandled)
-                        {
-                            // 回退到默认方式
-                            Commander.execute(CSteamID.Nil, args);
-                        }
-
+                        Commander.execute(CSteamID.Nil, fullCommand);
                         executed = true;
                         tcs.TrySetResult(true);
                     }
@@ -389,46 +384,43 @@ namespace Emqo.KookBot_Unturned
                 }
 
                 // 在主线程中查找玩家并执行禁言
-                var muteResult = await Task.Run(() =>
+                var tcs = new TaskCompletionSource<(bool success, string message, MuteInfo muteInfo)>(TaskCreationOptions.RunContinuationsAsynchronously);
+                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
                 {
-                    var tcs = new TaskCompletionSource<(bool success, string message, MuteInfo muteInfo)>();
-                    Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                    try
                     {
-                        try
+                        var player = PlayerTool.getPlayer(playerName);
+                        if (player == null)
                         {
-                            var player = PlayerTool.getPlayer(playerName);
-                            if (player == null)
-                            {
-                                tcs.TrySetResult((false, $"找不到玩家：{playerName}", null));
-                                return;
-                            }
-
-                            var unturnedPlayer = UnturnedPlayer.FromPlayer(player);
-                            if (unturnedPlayer == null)
-                            {
-                                tcs.TrySetResult((false, $"无法获取玩家信息：{playerName}", null));
-                                return;
-                            }
-
-                            var duration = durationMinutes.HasValue ? TimeSpan.FromMinutes(durationMinutes.Value) : (TimeSpan?)null;
-                            if (ChatModerationManager.TryMutePlayer(unturnedPlayer, duration, reason, nickname, out var muteInfo))
-                            {
-                                var durationText = muteInfo.GetDurationDescription();
-                                tcs.TrySetResult((true, $"已禁言玩家 {unturnedPlayer.DisplayName}（{durationText}）", muteInfo));
-                            }
-                            else
-                            {
-                                tcs.TrySetResult((false, $"禁言玩家失败：{playerName}", null));
-                            }
+                            tcs.TrySetResult((false, $"找不到玩家：{playerName}", null));
+                            return;
                         }
-                        catch (Exception ex)
+
+                        var unturnedPlayer = UnturnedPlayer.FromPlayer(player);
+                        if (unturnedPlayer == null)
                         {
-                            tcs.TrySetResult((false, $"错误：{ex.Message}", null));
+                            tcs.TrySetResult((false, $"无法获取玩家信息：{playerName}", null));
+                            return;
                         }
-                    });
 
-                    return tcs.Task.Result;
+                        var duration = durationMinutes.HasValue ? TimeSpan.FromMinutes(durationMinutes.Value) : (TimeSpan?)null;
+                        if (ChatModerationManager.TryMutePlayer(unturnedPlayer, duration, reason, nickname, out var muteInfo))
+                        {
+                            var durationText = muteInfo.GetDurationDescription();
+                            tcs.TrySetResult((true, $"已禁言玩家 {unturnedPlayer.DisplayName}（{durationText}）", muteInfo));
+                        }
+                        else
+                        {
+                            tcs.TrySetResult((false, $"禁言玩家失败：{playerName}", null));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.TrySetResult((false, $"错误：{ex.Message}", null));
+                    }
                 });
+
+                var muteResult = await tcs.Task;
 
                 if (muteResult.success)
                 {
@@ -480,30 +472,27 @@ namespace Emqo.KookBot_Unturned
                 var playerName = args.Trim();
 
                 // 在主线程中执行解除禁言
-                var unmuteResult = await Task.Run(() =>
+                var tcs = new TaskCompletionSource<(bool success, string message, MuteInfo muteInfo)>(TaskCreationOptions.RunContinuationsAsynchronously);
+                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
                 {
-                    var tcs = new TaskCompletionSource<(bool success, string message, MuteInfo muteInfo)>();
-                    Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                    try
                     {
-                        try
+                        if (ChatModerationManager.TryUnmutePlayer(playerName, out var muteInfo))
                         {
-                            if (ChatModerationManager.TryUnmutePlayer(playerName, out var muteInfo))
-                            {
-                                tcs.TrySetResult((true, $"已解除禁言：{muteInfo.PlayerName}", muteInfo));
-                            }
-                            else
-                            {
-                                tcs.TrySetResult((false, $"找不到禁言记录：{playerName}", null));
-                            }
+                            tcs.TrySetResult((true, $"已解除禁言：{muteInfo.PlayerName}", muteInfo));
                         }
-                        catch (Exception ex)
+                        else
                         {
-                            tcs.TrySetResult((false, $"错误：{ex.Message}", null));
+                            tcs.TrySetResult((false, $"找不到禁言记录：{playerName}", null));
                         }
-                    });
-
-                    return tcs.Task.Result;
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.TrySetResult((false, $"错误：{ex.Message}", null));
+                    }
                 });
+
+                var unmuteResult = await tcs.Task;
 
                 if (unmuteResult.success)
                 {
@@ -545,25 +534,22 @@ namespace Emqo.KookBot_Unturned
             try
             {
                 // 在主线程中获取禁言列表
-                var mutes = await Task.Run(() =>
+                var tcs = new TaskCompletionSource<IReadOnlyCollection<MuteInfo>>(TaskCreationOptions.RunContinuationsAsynchronously);
+                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
                 {
-                    var tcs = new TaskCompletionSource<IReadOnlyCollection<MuteInfo>>();
-                    Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                    try
                     {
-                        try
-                        {
-                            var activeMutes = ChatModerationManager.GetActiveMutes();
-                            tcs.TrySetResult(activeMutes);
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogError($"Error getting mutes: {ex.Message}");
-                            tcs.TrySetResult(new List<MuteInfo>());
-                        }
-                    });
-
-                    return tcs.Task.Result;
+                        var activeMutes = ChatModerationManager.GetActiveMutes();
+                        tcs.TrySetResult(activeMutes);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"Error getting mutes: {ex.Message}");
+                        tcs.TrySetResult(new List<MuteInfo>());
+                    }
                 });
+
+                var mutes = await tcs.Task;
 
                 if (mutes.Count == 0)
                 {
@@ -610,42 +596,39 @@ namespace Emqo.KookBot_Unturned
             try
             {
                 // 在主线程中获取玩家列表
-                var players = await Task.Run(() =>
+                var tcs = new TaskCompletionSource<List<(string, string)>>(TaskCreationOptions.RunContinuationsAsynchronously);
+                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
                 {
-                    var tcs = new TaskCompletionSource<List<(string, string)>>();
-                    Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                    try
                     {
-                        try
-                        {
-                            var playerList = new List<(string, string)>();
-                            var allClients = Provider.clients;
+                        var playerList = new List<(string, string)>();
+                        var allClients = Provider.clients;
 
-                            if (allClients != null)
+                        if (allClients != null)
+                        {
+                            foreach (var client in allClients)
                             {
-                                foreach (var client in allClients)
+                                if (client != null && client.player != null)
                                 {
-                                    if (client != null && client.player != null)
+                                    var unturnedPlayer = UnturnedPlayer.FromPlayer(client.player);
+                                    if (unturnedPlayer != null)
                                     {
-                                        var unturnedPlayer = UnturnedPlayer.FromPlayer(client.player);
-                                        if (unturnedPlayer != null)
-                                        {
-                                            playerList.Add((unturnedPlayer.DisplayName, unturnedPlayer.CSteamID.ToString()));
-                                        }
+                                        playerList.Add((unturnedPlayer.DisplayName, unturnedPlayer.CSteamID.ToString()));
                                     }
                                 }
                             }
-
-                            tcs.TrySetResult(playerList);
                         }
-                        catch (Exception ex)
-                        {
-                            Logger.LogError($"Error getting player list: {ex.Message}");
-                            tcs.TrySetResult(new List<(string, string)>());
-                        }
-                    });
 
-                    return tcs.Task.Result;
+                        tcs.TrySetResult(playerList);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"Error getting player list: {ex.Message}");
+                        tcs.TrySetResult(new List<(string, string)>());
+                    }
                 });
+
+                var players = await tcs.Task;
 
                 if (players.Count == 0)
                 {

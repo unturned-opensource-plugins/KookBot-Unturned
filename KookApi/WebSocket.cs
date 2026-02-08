@@ -490,7 +490,7 @@ public class KookWebSocketClient
         // 处理指令或转发消息
         if (content.StartsWith("/"))
         {
-            Commands.Init(new Message(config.BotToken));
+            // Commands.Init 已在插件加载时调用，无需重复初始化
             await Commands.ExecuteAsync(nickname, content, id, config.ChannelId);
         }
         else
@@ -853,7 +853,7 @@ public class KookWebSocketClient
     {
         // Step 8: 收到reconnect包，清空状态
         _sessionId = null;
-        _lastSequenceNumber = 0;
+        Interlocked.Exchange(ref _lastSequenceNumber, 0);
         lock (_resumingLock)
         {
             _isResuming = false;
