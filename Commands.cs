@@ -642,8 +642,7 @@ namespace Emqo.KookBot_Unturned
 
                 foreach (var (name, steamId) in players.Take(20))
                 {
-                    playerListText.AppendLine($"• **{name}**");
-                    playerListText.AppendLine($"  Steam ID：`{steamId}`");
+                    playerListText.AppendLine($"• **{name}** `{steamId}`");
                 }
 
                 if (players.Count > 20)
