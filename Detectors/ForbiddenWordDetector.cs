@@ -20,9 +20,8 @@ namespace Emqo.KookBot_Unturned.Detectors
         private volatile bool _autoMuteEnabled;
         private volatile int _autoMuteSeconds;
 
-        // Pre-cached lowercase forbidden words for fast lookup
-        private HashSet<string> _forbiddenWordsLower = new(StringComparer.OrdinalIgnoreCase);
-        private readonly object _wordsLock = new();
+        // Pre-cached lowercase forbidden words - volatile reference for copy-on-write
+        private volatile HashSet<string> _forbiddenWordsLower = new(StringComparer.OrdinalIgnoreCase);
 
         public void Initialize(ChatModerationConfig config)
         {
@@ -46,21 +45,19 @@ namespace Emqo.KookBot_Unturned.Detectors
                 ? config.AutoMuteForbiddenWordSeconds
                 : 300;
 
-            // Rebuild the forbidden words cache
-            lock (_wordsLock)
+            // Rebuild the forbidden words cache (copy-on-write)
+            var newSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (config.ForbiddenWords != null)
             {
-                _forbiddenWordsLower = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (config.ForbiddenWords != null)
+                foreach (var word in config.ForbiddenWords)
                 {
-                    foreach (var word in config.ForbiddenWords)
+                    if (!string.IsNullOrWhiteSpace(word))
                     {
-                        if (!string.IsNullOrWhiteSpace(word))
-                        {
-                            _forbiddenWordsLower.Add(word.Trim());
-                        }
+                        newSet.Add(word.Trim());
                     }
                 }
             }
+            _forbiddenWordsLower = newSet;
         }
 
         public Task<DetectionResult> DetectAsync(UnturnedPlayer player, string message)
@@ -75,15 +72,11 @@ namespace Emqo.KookBot_Unturned.Detectors
                 return DetectionResult.Allowed();
             }
 
-            // Get a snapshot of the forbidden words
-            HashSet<string> wordsSnapshot;
-            lock (_wordsLock)
+            // Read volatile reference snapshot (no lock needed with copy-on-write)
+            var wordsSnapshot = _forbiddenWordsLower;
+            if (wordsSnapshot.Count == 0)
             {
-                if (_forbiddenWordsLower.Count == 0)
-                {
-                    return DetectionResult.Allowed();
-                }
-                wordsSnapshot = new HashSet<string>(_forbiddenWordsLower, StringComparer.OrdinalIgnoreCase);
+                return DetectionResult.Allowed();
             }
 
             // Check for forbidden words using substring matching
@@ -110,10 +103,7 @@ namespace Emqo.KookBot_Unturned.Detectors
 
         public void Shutdown()
         {
-            lock (_wordsLock)
-            {
-                _forbiddenWordsLower.Clear();
-            }
+            _forbiddenWordsLower = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
 
         public void CleanupPlayerData(CSteamID steamId)

@@ -12,8 +12,12 @@ using Emqo.KookBot_Unturned.KookApi;
 using Rocket.Unturned.Chat;
 using Emqo.KookBot_Unturned;
 using Emqo.KookBot_Unturned.Interfaces;
+using Emqo.KookBot_Unturned.Utilities;
 using Rocket.Core.Plugins;
 using System.Collections.Generic;
+
+namespace Emqo.KookBot_Unturned.KookApi
+{
 public class KookWebSocketClient
 {
     private const int ReceiveBufferSize = 8192;  // WebSocket receive buffer size
@@ -509,10 +513,10 @@ public class KookWebSocketClient
             }
 
             // 清理昵称，防止富文本注入
-            string sanitizedNickname = SanitizeRichText(nickname);
+            string sanitizedNickname = StringUtils.SanitizeRichText(nickname);
 
             // 清理消息内容，防止富文本注入
-            string sanitizedContent = SanitizeRichText(content);
+            string sanitizedContent = StringUtils.SanitizeRichText(content);
 
             // 格式化消息
             string formatted = config.EnableSync
@@ -540,25 +544,6 @@ public class KookWebSocketClient
                 }
             });
         }
-    }
-
-    /// <summary>
-    /// 清理富文本标签，防止注入攻击
-    /// </summary>
-    private string SanitizeRichText(string input)
-    {
-        if (string.IsNullOrEmpty(input))
-        {
-            return input;
-        }
-
-        // 替换富文本标签的关键字符为全角字符，防止注入
-        return input
-            .Replace("<", "＜")
-            .Replace(">", "＞")
-            .Replace("[", "［")
-            .Replace("]", "］")
-            .Replace("\\", "＼");
     }
 
     private void StartHeartbeat()
@@ -1067,7 +1052,5 @@ public class KookWebSocketClient
         deflateStream.CopyTo(resultStream);
         return resultStream.ToArray();
     }
-
-
-
+}
 }

@@ -129,6 +129,23 @@ namespace Emqo.KookBot_Unturned
 
         internal static async Task<ChatModerationResult> EvaluateMessageAsync(UnturnedPlayer player, string message)
         {
+            return EvaluateMessageCore(player, message, async: true,
+                detect: (detector, p, m) => detector.DetectAsync(p, m));
+        }
+
+        /// <summary>
+        /// 同步检测消息是否违规（用于在聊天事件中同步拦截）
+        /// </summary>
+        internal static ChatModerationResult EvaluateMessageSync(UnturnedPlayer player, string message)
+        {
+            return EvaluateMessageCore(player, message, async: false,
+                detect: (detector, p, m) => Task.FromResult(detector.DetectSync(p, m)));
+        }
+
+        private static ChatModerationResult EvaluateMessageCore(
+            UnturnedPlayer player, string message, bool async,
+            Func<IMessageDetector, UnturnedPlayer, string, Task<DetectionResult>> detect)
+        {
             var result = new ChatModerationResult { IsAllowed = true };
 
             if (player == null || string.IsNullOrEmpty(message))
@@ -168,89 +185,8 @@ namespace Emqo.KookBot_Unturned
 
                 try
                 {
-                    var detectionResult = await detector.DetectAsync(player, message);
-                    if (detectionResult.IsViolation)
-                    {
-                        result.IsAllowed = false;
-                        result.DenyReason = detectionResult.Reason;
-                        result.BlockReason = $"[{detectionResult.DetectorName}] {detectionResult.Reason}";
-
-                        // Apply auto-mute if requested
-                        if (detectionResult.ShouldAutoMute && detectionResult.AutoMuteDuration.HasValue)
-                        {
-                            var appliedMute = ApplyAutoMute(
-                                player.CSteamID,
-                                player.DisplayName ?? player.CharacterName ?? player.CSteamID.ToString(),
-                                detectionResult.AutoMuteDuration,
-                                detectionResult.Reason
-                            );
-                            result.WasAutoMute = true;
-                            result.AppliedMute = appliedMute;
-
-                            // Broadcast if enabled
-                            if (settings.BroadcastSpamMutes)
-                            {
-                                BroadcastMuteToAll(player.DisplayName ?? player.CharacterName, appliedMute);
-                            }
-                        }
-
-                        return result;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"Error in detector {detector.Name}: {ex.Message}");
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// 同步检测消息是否违规（用于在聊天事件中同步拦截）
-        /// </summary>
-        internal static ChatModerationResult EvaluateMessageSync(UnturnedPlayer player, string message)
-        {
-            var result = new ChatModerationResult { IsAllowed = true };
-
-            if (player == null || string.IsNullOrEmpty(message))
-            {
-                return result;
-            }
-
-            var settings = _config ?? ChatModerationConfig.CreateDefault();
-
-            if (!settings.EnableModeration)
-            {
-                return result;
-            }
-
-            // Check if player is muted
-            if (IsMuted(player.CSteamID, out var muteInfo))
-            {
-                result.IsAllowed = false;
-                result.DenyReason = BuildMuteMessage(muteInfo);
-                result.AppliedMute = muteInfo;
-                return result;
-            }
-
-            // Run all detectors synchronously
-            List<IMessageDetector> detectorsSnapshot;
-            lock (_detectorsLock)
-            {
-                detectorsSnapshot = new List<IMessageDetector>(_detectors);
-            }
-
-            foreach (var detector in detectorsSnapshot)
-            {
-                if (!detector.IsEnabled)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    var detectionResult = detector.DetectSync(player, message);
+                    var detectionTask = detect(detector, player, message);
+                    var detectionResult = detectionTask.GetAwaiter().GetResult();
                     if (detectionResult.IsViolation)
                     {
                         result.IsAllowed = false;

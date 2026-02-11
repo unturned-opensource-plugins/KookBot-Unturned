@@ -21,80 +21,58 @@ namespace Emqo.KookBot_Unturned.KookApi
 
         public async Task<string> CreateMessageAsync(int type, string channelId, object content)
         {
-            var url = $"{_baseUrl}/message/create";
-
-            string contentString;
-
-            // 根据消息类型和内容类型处理 content
-            if (type == 10) // 卡片消息
+            return await ExecuteWithRetryAsync(async () =>
             {
-                if (content is string stringContent)
+                var url = $"{_baseUrl}/message/create";
+
+                string contentString;
+
+                // 根据消息类型和内容类型处理 content
+                if (type == 10) // 卡片消息
                 {
-                    // 如果传入的是字符串，假设已经是 JSON 格式
-                    contentString = stringContent;
+                    if (content is string stringContent)
+                    {
+                        contentString = stringContent;
+                    }
+                    else
+                    {
+                        contentString = JsonConvert.SerializeObject(content);
+                    }
                 }
                 else
                 {
-                    // 如果传入的是对象，序列化为 JSON
-                    contentString = JsonConvert.SerializeObject(content);
+                    contentString = content?.ToString() ?? "";
                 }
-            }
-            else // 文本消息 (type=1) 或 KMarkdown 消息 (type=9)
-            {
-                contentString = content?.ToString() ?? "";
-            }
 
-            // 创建消息请求对象
-            var messageRequest = new
-            {
-                type = type,
-                target_id = channelId,
-                content = contentString
-            };
+                var messageRequest = new
+                {
+                    type = type,
+                    target_id = channelId,
+                    content = contentString
+                };
 
-            // 序列化为 JSON
-            var postData = JsonConvert.SerializeObject(messageRequest);
-            var postDataBytes = Encoding.UTF8.GetBytes(postData);
+                var postData = JsonConvert.SerializeObject(messageRequest);
+                var postDataBytes = Encoding.UTF8.GetBytes(postData);
 
-            var request = (HttpWebRequest)WebRequest.Create(url);
-            request.Method = "POST";
-            request.ContentType = "application/json; charset=utf-8";
-            request.ContentLength = postDataBytes.Length;
-            request.Headers.Add("Authorization", $"Bot {_botToken}");
-            // Add timeout protection (30 seconds)
-            request.Timeout = 30000;
-            request.ReadWriteTimeout = 30000;
+                var request = (HttpWebRequest)WebRequest.Create(url);
+                request.Method = "POST";
+                request.ContentType = "application/json; charset=utf-8";
+                request.ContentLength = postDataBytes.Length;
+                request.Headers.Add("Authorization", $"Bot {_botToken}");
+                request.Timeout = 30000;
+                request.ReadWriteTimeout = 30000;
 
-            // 写入请求体
-            using (var requestStream = await request.GetRequestStreamAsync())
-            {
-                await requestStream.WriteAsync(postDataBytes, 0, postDataBytes.Length);
-            }
+                using (var requestStream = await request.GetRequestStreamAsync())
+                {
+                    await requestStream.WriteAsync(postDataBytes, 0, postDataBytes.Length);
+                }
 
-            // 获取响应
-            try
-            {
                 using (var response = (HttpWebResponse)await request.GetResponseAsync())
                 using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
                 {
                     return await reader.ReadToEndAsync();
                 }
-            }
-            catch (WebException ex)
-            {
-                // 尝试读取错误响应，确保 Response 被正确释放
-                if (ex.Response != null)
-                {
-                    using (var errorResponse = ex.Response)
-                    using (var errorStream = errorResponse.GetResponseStream())
-                    using (var reader = new StreamReader(errorStream, Encoding.UTF8))
-                    {
-                        var errorResponseText = await reader.ReadToEndAsync();
-                        throw new Exception($"HTTP Error {(errorResponse as HttpWebResponse)?.StatusCode}: {errorResponseText}", ex);
-                    }
-                }
-                throw;
-            }
+            });
         }
 
 

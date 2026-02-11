@@ -230,18 +230,18 @@ namespace Emqo.KookBot_Unturned
                     UnturnedPlayerEvents.OnPlayerRevive += OnPlayerRevive;
                     UnturnedPlayerEvents.OnPlayerChatted += OnPlayerChatted;
 
-                // PvP 事件
-                DamageTool.damagePlayerRequested += OnPlayerDamaged;
+                    // PvP 事件
+                    DamageTool.damagePlayerRequested += OnPlayerDamaged;
 
-                _eventsRegistered = true;
-                Logger.Log("✅ Events registered successfully");
+                    _eventsRegistered = true;
+                    Logger.Log("✅ Events registered successfully");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Error registering events: {ex.Message}");
+                    _eventsRegistered = false;
+                }
             }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error registering events: {ex.Message}");
-                _eventsRegistered = false;
-            }
-            }  // 关闭 lock 块
         }
 
         private static void UnregisterEvents()
@@ -265,14 +265,14 @@ namespace Emqo.KookBot_Unturned
                     // PvP 事件
                     DamageTool.damagePlayerRequested -= OnPlayerDamaged;
 
-                _eventsRegistered = false;
-                Logger.Log("✅ Events unregistered successfully");
+                    _eventsRegistered = false;
+                    Logger.Log("✅ Events unregistered successfully");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Error unregistering events: {ex.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error unregistering events: {ex.Message}");
-            }
-            }  // 关闭 lock 块
         }
 
         #region 玩家事件
@@ -643,7 +643,7 @@ namespace Emqo.KookBot_Unturned
         }
 
         // 优化：预定义命令前缀字符集，用于快速检查
-        private static readonly string CommandPrefixChars = string.Concat(CommandPrefixes);
+        private static readonly HashSet<char> CommandPrefixChars = new() { '/', '!', '@', '.', '#', '$' };
 
         private static async Task SendChatMessageAsync(string playerName, string processedMessage, EChatMode chatMode, bool isFiltered = false)
         {

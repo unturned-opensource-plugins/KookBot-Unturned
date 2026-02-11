@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Emqo.KookBot_Unturned.KookApi;
 using Emqo.KookBot_Unturned.Monitoring;
+using Emqo.KookBot_Unturned.Utilities;
 using Rocket.Core.Logging;
 using Rocket.Unturned.Chat;
 using Rocket.Unturned.Player;
@@ -124,7 +125,7 @@ namespace Emqo.KookBot_Unturned
             if (!string.IsNullOrEmpty(args))
             {
                 // 防止富文本注入
-                args = SanitizeRichText(args);
+                args = StringUtils.SanitizeRichText(args);
 
                 Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
                 {
@@ -533,23 +534,7 @@ namespace Emqo.KookBot_Unturned
 
             try
             {
-                // 在主线程中获取禁言列表
-                var tcs = new TaskCompletionSource<IReadOnlyCollection<MuteInfo>>(TaskCreationOptions.RunContinuationsAsynchronously);
-                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
-                {
-                    try
-                    {
-                        var activeMutes = ChatModerationManager.GetActiveMutes();
-                        tcs.TrySetResult(activeMutes);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError($"Error getting mutes: {ex.Message}");
-                        tcs.TrySetResult(new List<MuteInfo>());
-                    }
-                });
-
-                var mutes = await tcs.Task;
+                var mutes = ChatModerationManager.GetActiveMutes();
 
                 if (mutes.Count == 0)
                 {
@@ -707,27 +692,6 @@ namespace Emqo.KookBot_Unturned
         private static string BuildInfoCard(string title, string body)
         {
             return KookCardFactory.BuildMarkdownCard("ℹ️", title, body, DateTimeOffset.Now, "info");
-        }
-
-        private static string BuildSuccessCard(string title, string body)
-        {
-            return KookCardFactory.BuildMarkdownCard("✅", title, body, DateTimeOffset.Now, "success");
-        }
-
-        private static string SanitizeRichText(string input)
-        {
-            if (string.IsNullOrEmpty(input))
-            {
-                return input;
-            }
-
-            // 统一的富文本清理 - 替换所有可能的注入字符
-            return input
-                .Replace("<", "＜")
-                .Replace(">", "＞")
-                .Replace("[", "［")
-                .Replace("]", "］")
-                .Replace("\\", "＼");
         }
 
         private static bool ShouldLogDebug()
