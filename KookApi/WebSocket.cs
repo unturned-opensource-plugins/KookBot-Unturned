@@ -116,10 +116,11 @@ public class KookWebSocketClient
                 if (string.IsNullOrEmpty(_gatewayUrl))
                 {
                     Logger.LogError("❌ Unable to obtain Gateway URL, will retry...");
-                    // 如果获取失败，不计入 maxAttempts，直接进入 InfiniteRetryAsync 的逻辑
                     await InfiniteRetryAsync();
-                    attempt = 0; // 重置尝试次数
-                    continue; // 继续外层循环，重新尝试获取 Gateway URL 并连接
+                    attempt = 0;
+                    // InfiniteRetryAsync 成功后 _gatewayUrl 已设置，继续连接
+                    if (string.IsNullOrEmpty(_gatewayUrl))
+                        continue;
                 }
 
                 Logger.Log("🔄 Get Websocket URL: " + _gatewayUrl);
@@ -133,6 +134,13 @@ public class KookWebSocketClient
                 // 如果 StartReceivingAsync 返回，说明接收循环已停止，需要重新连接
                 Logger.LogWarning("⚠️ Receive loop stopped, attempting to reconnect...");
                 attempt = 0; // 重置重试计数
+
+                // 防止紧密循环：重连前等待
+                await Task.Delay(2000, _cancellationTokenSource.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
             catch (Exception ex)
             {
@@ -160,7 +168,7 @@ public class KookWebSocketClient
                 {
                     // Reached max initial attempts, enter infinite retry for Gateway
                     await InfiniteRetryAsync();
-                    attempt = 0; // Reset counter for initial attempts after InfiniteRetryAsync finishes
+                    attempt = 0;
                 }
             }
         }
@@ -253,9 +261,10 @@ public class KookWebSocketClient
         {
             try
             {
-                if (!await WaitForOpenConnectionAsync())
+                if (_webSocket == null || _webSocket.State != WebSocketState.Open)
                 {
-                    continue;
+                    // 连接已关闭，退出循环让主循环处理重连
+                    break;
                 }
 
                 var messageText = await ReceiveMessageAsync(buffer);
@@ -266,15 +275,15 @@ public class KookWebSocketClient
             }
             catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
             {
-                Logger.LogError("🔌 WebSocket connection unexpectedly disconnected, starting reconnection...");
+                Logger.LogError("🔌 WebSocket connection unexpectedly disconnected");
                 await HandleReconnectAsync();
-                await Task.Delay(1000, _cancellationTokenSource.Token);
+                break; // 退出循环，让主循环重连
             }
             catch (WebSocketException ex)
             {
                 Logger.LogError($"❌ WebSocket error: {ex.WebSocketErrorCode} - {ex.Message}");
                 await HandleReconnectAsync();
-                await Task.Delay(1000, _cancellationTokenSource.Token);
+                break; // 退出循环，让主循环重连
             }
             catch (OperationCanceledException)
             {
@@ -286,25 +295,11 @@ public class KookWebSocketClient
                 if (_webSocket == null || _webSocket.State != WebSocketState.Open)
                 {
                     await HandleReconnectAsync();
+                    break; // 退出循环，让主循环重连
                 }
                 await Task.Delay(1000, _cancellationTokenSource.Token);
             }
         }
-    }
-
-    /// <summary>
-    /// Waits for the WebSocket connection to be open.
-    /// </summary>
-    /// <returns>True if connection is open, false if waiting for reconnection.</returns>
-    private async Task<bool> WaitForOpenConnectionAsync()
-    {
-        if (_webSocket == null || _webSocket.State != WebSocketState.Open)
-        {
-            Logger.LogWarning("⚠️ WebSocket is not open, waiting for reconnection...");
-            await Task.Delay(1000, _cancellationTokenSource.Token);
-            return false;
-        }
-        return true;
     }
 
     /// <summary>
@@ -654,9 +649,9 @@ public class KookWebSocketClient
                 return;
             }
 
-            // Step 7: Resume失败，回到完全重连
-            Logger.Log("❌ Resume failed, start complete reconnection...");
-            await ConnectWithRetryAsync();
+            // Step 7: Resume失败，关闭连接让主循环处理重连
+            Logger.Log("❌ Resume failed, closing connection to trigger reconnect...");
+            await CloseWebSocketAsync();
         }
         finally
         {
@@ -826,7 +821,8 @@ public class KookWebSocketClient
         {
             _heartbeatTimer?.Dispose();
             _heartbeatTimer = null;
-            await ConnectWithRetryAsync();
+            // 关闭当前连接，让 ConnectWithRetryAsync 的主循环检测到并重连
+            await CloseWebSocketAsync();
         }
         finally
         {
@@ -866,19 +862,20 @@ public class KookWebSocketClient
                 {
                     Logger.LogError("❌ Failed to obtain Gateway URL, will retry.");
                     delay = Math.Min(delay * 2, maxDelay); // Exponential backoff
-                    continue; // Continue loop to retry fetching Gateway URL
+                    continue;
                 }
 
-                // 成功获取 Gateway URL 后，尝试连接 WebSocket
-                Logger.Log("✅ Successfully obtained Gateway URL. Attempting WebSocket connection...");
-                await ConnectWebSocketAsync(); // 尝试连接 WebSocket
-                await StartReceivingAsync(); // 启动接收消息
-
-                return; // Gateway URL 获取成功且 WebSocket 连接成功，退出无限重试循环
+                // 成功获取 Gateway URL，返回让调用方处理连接和接收
+                Logger.Log("✅ Successfully obtained Gateway URL.");
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
             catch (Exception ex)
             {
-                Logger.LogError($"❌ Connection/Gateway acquisition failed in infinite retry: {ex.Message}");
+                Logger.LogError($"❌ Gateway acquisition failed in infinite retry: {ex.Message}");
                 delay = Math.Min(delay * 2, maxDelay); // Exponential backoff
             }
         }
