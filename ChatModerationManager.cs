@@ -11,6 +11,7 @@ using SDG.Unturned;
 using Steamworks;
 using Emqo.KookBot_Unturned.Interfaces;
 using Emqo.KookBot_Unturned.Detectors;
+using Emqo.KookBot_Unturned.Utilities;
 
 namespace Emqo.KookBot_Unturned
 {
@@ -20,6 +21,8 @@ namespace Emqo.KookBot_Unturned
         private static readonly ConcurrentDictionary<CSteamID, MuteInfo> MuteMap = new();
         private static CancellationTokenSource _cleanupCancellationTokenSource;
         private static Task _cleanupTask;
+        private static readonly object _lifecycleLock = new();
+        private static long _initializeGeneration;
 
         // Cleanup throttling
         private static DateTimeOffset _lastCleanupTime = DateTimeOffset.MinValue;
@@ -36,22 +39,30 @@ namespace Emqo.KookBot_Unturned
 
         internal static void Initialize(KookBot_UnturnedConfiguration configuration, IConfigurationProvider configProvider = null)
         {
-            _configProvider = configProvider ?? new DefaultConfigurationProvider(() => KookBot_UnturnedPlugin.Instance?.Configuration?.Instance);
-
-            if (configuration?.Moderation == null)
+            lock (_lifecycleLock)
             {
-                configuration.Moderation = ChatModerationConfig.CreateDefault();
+                _configProvider = configProvider ?? new DefaultConfigurationProvider(() => KookBot_UnturnedPlugin.Instance?.Configuration?.Instance);
+
+                if (configuration?.Moderation == null)
+                {
+                    configuration.Moderation = ChatModerationConfig.CreateDefault();
+                }
+
+                configuration.Moderation.ApplyDefaultsIfNeeded();
+                _config = configuration.Moderation;
+
+                StopCleanupLoopLocked();
+                ResetDetectorsLocked();
+
+                RegisterDefaultDetectors();
+                StartCleanupLoopLocked();
+
+                var generation = Interlocked.Increment(ref _initializeGeneration);
+                if (ShouldLogDebug)
+                {
+                    Logger.Log($"Chat moderation initialized (generation {generation}, detectors: {_detectors.Count})");
+                }
             }
-
-            configuration.Moderation.ApplyDefaultsIfNeeded();
-            _config = configuration.Moderation;
-
-            // Register default detectors
-            RegisterDefaultDetectors();
-
-            // Start cleanup task for expired mutes
-            _cleanupCancellationTokenSource = new CancellationTokenSource();
-            _cleanupTask = StartPeriodicCleanupAsync(_cleanupCancellationTokenSource.Token);
         }
 
         internal static void UpdateConfig(ChatModerationConfig config)
@@ -87,39 +98,20 @@ namespace Emqo.KookBot_Unturned
         {
             try
             {
-                _cleanupCancellationTokenSource?.Cancel();
-                _cleanupCancellationTokenSource?.Dispose();
-
-                if (_cleanupTask != null && !_cleanupTask.IsCompleted)
+                lock (_lifecycleLock)
                 {
-                    try
+                    StopCleanupLoopLocked();
+                    ResetDetectorsLocked();
+
+                    MuteMap.Clear();
+                    _config = null;
+                    _configProvider = null;
+
+                    if (ShouldLogDebug)
                     {
-                        _cleanupTask.Wait(TimeSpan.FromSeconds(1));
-                    }
-                    catch (AggregateException)
-                    {
-                        // Ignore cleanup task exceptions during shutdown
+                        Logger.Log("Chat moderation shutdown completed");
                     }
                 }
-
-                // Shutdown all detectors
-                lock (_detectorsLock)
-                {
-                    foreach (var detector in _detectors)
-                    {
-                        try
-                        {
-                            detector.Shutdown();
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogError($"Error shutting down detector {detector.Name}: {ex.Message}");
-                        }
-                    }
-                    _detectors.Clear();
-                }
-
-                MuteMap.Clear();
             }
             catch (Exception ex)
             {
@@ -535,11 +527,14 @@ namespace Emqo.KookBot_Unturned
                 return;
             }
 
-            Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+            if (!MainThreadDispatcherGuard.TryQueue(() =>
             {
                 var message = BuildMuteMessage(muteInfo);
                 UnturnedChat.Say(player, message, UnityEngine.Color.red);
-            });
+            }))
+            {
+                Logger.LogWarning($"⚠️ Main thread dispatcher is saturated, skip mute notification for {player.DisplayName}");
+            }
         }
 
         private static Task CleanupExpiredMutesAsync()
@@ -559,11 +554,16 @@ namespace Emqo.KookBot_Unturned
         {
             try
             {
+                if (ShouldLogDebug)
+                {
+                    Logger.Log($"Chat moderation cleanup loop started (generation {Volatile.Read(ref _initializeGeneration)})");
+                }
+
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     try
                     {
-                        await Task.Delay(TimeSpan.FromMinutes(5), cancellationToken);
+                        await Task.Delay(TimeSpan.FromSeconds(CleanupIntervalSeconds), cancellationToken);
 
                         if (!cancellationToken.IsCancellationRequested)
                         {
@@ -583,6 +583,73 @@ namespace Emqo.KookBot_Unturned
             catch (Exception ex)
             {
                 Logger.LogError($"Periodic cleanup task failed: {ex.Message}");
+            }
+            finally
+            {
+                if (ShouldLogDebug)
+                {
+                    Logger.Log($"Chat moderation cleanup loop stopped (generation {Volatile.Read(ref _initializeGeneration)})");
+                }
+            }
+        }
+
+        private static void StartCleanupLoopLocked()
+        {
+            _cleanupCancellationTokenSource = new CancellationTokenSource();
+            _cleanupTask = StartPeriodicCleanupAsync(_cleanupCancellationTokenSource.Token);
+        }
+
+        private static void StopCleanupLoopLocked()
+        {
+            var cancellationTokenSource = _cleanupCancellationTokenSource;
+            var cleanupTask = _cleanupTask;
+
+            _cleanupCancellationTokenSource = null;
+            _cleanupTask = null;
+
+            if (cancellationTokenSource != null)
+            {
+                try
+                {
+                    cancellationTokenSource.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            }
+
+            if (cleanupTask != null && !cleanupTask.IsCompleted)
+            {
+                try
+                {
+                    cleanupTask.Wait(TimeSpan.FromSeconds(1));
+                }
+                catch (AggregateException)
+                {
+                    // Ignore cleanup task exceptions during shutdown/restart
+                }
+            }
+
+            cancellationTokenSource?.Dispose();
+        }
+
+        private static void ResetDetectorsLocked()
+        {
+            lock (_detectorsLock)
+            {
+                foreach (var detector in _detectors)
+                {
+                    try
+                    {
+                        detector.Shutdown();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"Error shutting down detector {detector.Name}: {ex.Message}");
+                    }
+                }
+
+                _detectors.Clear();
             }
         }
 
@@ -620,7 +687,7 @@ namespace Emqo.KookBot_Unturned
 
             var durationText = muteInfo.GetDurationDescription();
 
-            Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+            if (!MainThreadDispatcherGuard.TryQueue(() =>
             {
                 try
                 {
@@ -640,7 +707,10 @@ namespace Emqo.KookBot_Unturned
                 {
                     Logger.LogError($"Error broadcasting mute message: {ex.Message}");
                 }
-            });
+            }))
+            {
+                Logger.LogWarning($"⚠️ Main thread dispatcher is saturated, skip mute broadcast for {playerName}");
+            }
         }
     }
 

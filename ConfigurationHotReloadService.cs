@@ -15,6 +15,10 @@ namespace Emqo.KookBot_Unturned
         private static string _configPath;
         private static CancellationTokenSource _debounceCts;
         private static readonly object _debounceLock = new object();
+        private static long _reloadTriggerCount;
+        private static long _reloadApplyCount;
+        private static long _lastAppliedReloadTicks;
+        private static bool IsDebugEnabled => KookBot_UnturnedPlugin.Instance?.Configuration?.Instance?.Debug ?? false;
 
         public static void Start(string configPath)
         {
@@ -49,11 +53,6 @@ namespace Emqo.KookBot_Unturned
 
         public static void Stop()
         {
-            if (_watcher == null)
-            {
-                return;
-            }
-
             try
             {
                 // Cancel any pending debounced reload
@@ -64,12 +63,15 @@ namespace Emqo.KookBot_Unturned
                     _debounceCts = null;
                 }
 
-                _watcher.EnableRaisingEvents = false;
-                _watcher.Changed -= OnFileChanged;
-                _watcher.Created -= OnFileChanged;
-                _watcher.Renamed -= OnFileChanged;
-                _watcher.Dispose();
-                _watcher = null;
+                if (_watcher != null)
+                {
+                    _watcher.EnableRaisingEvents = false;
+                    _watcher.Changed -= OnFileChanged;
+                    _watcher.Created -= OnFileChanged;
+                    _watcher.Renamed -= OnFileChanged;
+                    _watcher.Dispose();
+                    _watcher = null;
+                }
 
                 // 释放旧的 SemaphoreSlim，下次 Start() 时会创建新实例
                 _semaphore?.Dispose();
@@ -91,6 +93,8 @@ namespace Emqo.KookBot_Unturned
 
         private static async Task OnFileChangedAsync()
         {
+            Interlocked.Increment(ref _reloadTriggerCount);
+
             // 检查 _semaphore 是否已被释放
             if (_semaphore == null)
             {
@@ -172,6 +176,14 @@ namespace Emqo.KookBot_Unturned
                     Logger.LogWarning("⚠️ BotToken changed via hot reload. Please restart the plugin to re-establish KOOK connections.");
                 }
 
+                Interlocked.Increment(ref _reloadApplyCount);
+                Interlocked.Exchange(ref _lastAppliedReloadTicks, DateTimeOffset.UtcNow.Ticks);
+
+                if (IsDebugEnabled)
+                {
+                    Logger.Log($"[DEBUG] Hot reload diagnostics: triggered={Volatile.Read(ref _reloadTriggerCount)}, applied={Volatile.Read(ref _reloadApplyCount)}, lastAppliedUtc={new DateTimeOffset(Interlocked.Read(ref _lastAppliedReloadTicks), TimeSpan.Zero):O}");
+                }
+
                 Logger.Log("✅ Configuration hot reload applied.");
 
             }
@@ -197,4 +209,3 @@ namespace Emqo.KookBot_Unturned
         }
     }
 }
-

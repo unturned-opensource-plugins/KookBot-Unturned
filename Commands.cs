@@ -19,6 +19,8 @@ namespace Emqo.KookBot_Unturned
     internal static class Commands
     {
         private static Message _message;
+        private static readonly TimeSpan MainThreadOperationTimeout = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan ConsoleCommandTimeout = TimeSpan.FromSeconds(30);
 
         // 配置属性快捷访问
         private static KookBot_UnturnedConfiguration Config =>
@@ -127,7 +129,7 @@ namespace Emqo.KookBot_Unturned
                 // 防止富文本注入
                 args = StringUtils.SanitizeRichText(args);
 
-                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                if (!MainThreadDispatcherGuard.TryQueue(() =>
                 {
                     var msg =
                         "<color=#FF3B3B>[Admin]</color>" +
@@ -143,7 +145,12 @@ namespace Emqo.KookBot_Unturned
                         null,
                         true // 启用 Rich Text
                     );
-                });
+                }))
+                {
+                    var busyCard = BuildWarningCard("主线程繁忙", "当前主线程任务积压过多，请稍后再试。");
+                    await _message.CreateMessageAsync(10, channelId, busyCard);
+                    return;
+                }
 
                 if (ShouldLogDebug())
                 {
@@ -239,11 +246,18 @@ namespace Emqo.KookBot_Unturned
             {
                 var executed = false;
                 var exception = (Exception)null;
+                using var operationCts = new CancellationTokenSource();
 
                 // 在主线程执行命令
                 var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                if (!MainThreadDispatcherGuard.TryQueue(cancellationToken =>
                 {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        tcs.TrySetCanceled();
+                        return;
+                    }
+
                     try
                     {
                         // Unturned 控制台命令使用 / 分隔参数
@@ -272,13 +286,18 @@ namespace Emqo.KookBot_Unturned
                         exception = ex;
                         tcs.TrySetResult(false);
                     }
-                });
+                }, operationCts.Token))
+                {
+                    var busyCard = BuildWarningCard("主线程繁忙", "当前主线程任务积压过多，请稍后再试。");
+                    await _message.CreateMessageAsync(10, channelId, busyCard);
+                    return;
+                }
 
-                // 等待执行完成，最多30秒
-                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30));
-                var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
-
-                if (completedTask == timeoutTask)
+                try
+                {
+                    await MainThreadDispatcherGuard.WaitAsync(tcs.Task, "Console command execution", ConsoleCommandTimeout, operationCts);
+                }
+                catch (TimeoutException)
                 {
                     var timeoutCard = BuildWarningCard("指令执行超时", $"**指令**：`{args}`\n**错误**：执行超时（30秒）");
                     await _message.CreateMessageAsync(10, channelId, timeoutCard);
@@ -385,9 +404,16 @@ namespace Emqo.KookBot_Unturned
                 }
 
                 // 在主线程中查找玩家并执行禁言
+                using var operationCts = new CancellationTokenSource();
                 var tcs = new TaskCompletionSource<(bool success, string message, MuteInfo muteInfo)>(TaskCreationOptions.RunContinuationsAsynchronously);
-                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                if (!MainThreadDispatcherGuard.TryQueue(cancellationToken =>
                 {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        tcs.TrySetCanceled();
+                        return;
+                    }
+
                     try
                     {
                         var player = PlayerTool.getPlayer(playerName);
@@ -419,9 +445,24 @@ namespace Emqo.KookBot_Unturned
                     {
                         tcs.TrySetResult((false, $"错误：{ex.Message}", null));
                     }
-                });
+                }, operationCts.Token))
+                {
+                    var busyCard = BuildWarningCard("主线程繁忙", "当前主线程任务积压过多，请稍后再试。");
+                    await _message.CreateMessageAsync(10, channelId, busyCard);
+                    return;
+                }
 
-                var muteResult = await tcs.Task;
+                (bool success, string message, MuteInfo muteInfo) muteResult;
+                try
+                {
+                    muteResult = await MainThreadDispatcherGuard.WaitAsync(tcs.Task, "Mute command", MainThreadOperationTimeout, operationCts);
+                }
+                catch (TimeoutException)
+                {
+                    var timeoutCard = BuildWarningCard("禁言执行超时", $"**玩家**：`{playerName}`\n**错误**：主线程处理超时（10秒）");
+                    await _message.CreateMessageAsync(10, channelId, timeoutCard);
+                    return;
+                }
 
                 if (muteResult.success)
                 {
@@ -473,9 +514,16 @@ namespace Emqo.KookBot_Unturned
                 var playerName = args.Trim();
 
                 // 在主线程中执行解除禁言
+                using var operationCts = new CancellationTokenSource();
                 var tcs = new TaskCompletionSource<(bool success, string message, MuteInfo muteInfo)>(TaskCreationOptions.RunContinuationsAsynchronously);
-                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                if (!MainThreadDispatcherGuard.TryQueue(cancellationToken =>
                 {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        tcs.TrySetCanceled();
+                        return;
+                    }
+
                     try
                     {
                         if (ChatModerationManager.TryUnmutePlayer(playerName, out var muteInfo))
@@ -491,9 +539,24 @@ namespace Emqo.KookBot_Unturned
                     {
                         tcs.TrySetResult((false, $"错误：{ex.Message}", null));
                     }
-                });
+                }, operationCts.Token))
+                {
+                    var busyCard = BuildWarningCard("主线程繁忙", "当前主线程任务积压过多，请稍后再试。");
+                    await _message.CreateMessageAsync(10, channelId, busyCard);
+                    return;
+                }
 
-                var unmuteResult = await tcs.Task;
+                (bool success, string message, MuteInfo muteInfo) unmuteResult;
+                try
+                {
+                    unmuteResult = await MainThreadDispatcherGuard.WaitAsync(tcs.Task, "Unmute command", MainThreadOperationTimeout, operationCts);
+                }
+                catch (TimeoutException)
+                {
+                    var timeoutCard = BuildWarningCard("解除禁言超时", $"**玩家**：`{playerName}`\n**错误**：主线程处理超时（10秒）");
+                    await _message.CreateMessageAsync(10, channelId, timeoutCard);
+                    return;
+                }
 
                 if (unmuteResult.success)
                 {
@@ -581,9 +644,16 @@ namespace Emqo.KookBot_Unturned
             try
             {
                 // 在主线程中获取玩家列表
+                using var operationCts = new CancellationTokenSource();
                 var tcs = new TaskCompletionSource<List<(string, string)>>(TaskCreationOptions.RunContinuationsAsynchronously);
-                Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                if (!MainThreadDispatcherGuard.TryQueue(cancellationToken =>
                 {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        tcs.TrySetCanceled();
+                        return;
+                    }
+
                     try
                     {
                         var playerList = new List<(string, string)>();
@@ -611,9 +681,24 @@ namespace Emqo.KookBot_Unturned
                         Logger.LogError($"Error getting player list: {ex.Message}");
                         tcs.TrySetResult(new List<(string, string)>());
                     }
-                });
+                }, operationCts.Token))
+                {
+                    var busyCard = BuildWarningCard("主线程繁忙", "当前主线程任务积压过多，请稍后再试。");
+                    await _message.CreateMessageAsync(10, channelId, busyCard);
+                    return;
+                }
 
-                var players = await tcs.Task;
+                List<(string, string)> players;
+                try
+                {
+                    players = await MainThreadDispatcherGuard.WaitAsync(tcs.Task, "List players command", MainThreadOperationTimeout, operationCts);
+                }
+                catch (TimeoutException)
+                {
+                    var timeoutCard = BuildWarningCard("获取玩家列表超时", "主线程处理超时（10秒），请稍后再试。");
+                    await _message.CreateMessageAsync(10, channelId, timeoutCard);
+                    return;
+                }
 
                 if (players.Count == 0)
                 {

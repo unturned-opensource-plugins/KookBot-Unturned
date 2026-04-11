@@ -32,16 +32,27 @@ public class KookWebSocketClient
     private long _lastSequenceNumber;
     private volatile bool _isResuming = false;
     private volatile bool _isReceiving = false;
-    private Timer _heartbeatTimer;
+    private CancellationTokenSource _heartbeatLoopCts;
+    private Task _heartbeatLoopTask;
     private long _lastPongReceivedTicks;  // 使用Ticks避免DateTime竞态条件
     private readonly SemaphoreSlim _reconnectSemaphore = new(1, 1);
     private Message _kookMessageApi;
     private readonly Random _random = new Random();
     private readonly object _randomLock = new object();  // Lock for Random thread safety
     private CancellationTokenSource _pongTimeoutCts;
+    private CancellationTokenSource _helloTimeoutCts;
     private readonly object _pongTimeoutLock = new object();  // Lock for CTS operations
+    private readonly object _helloTimeoutLock = new object();
     private readonly object _resumingLock = new object();  // Lock for _isResuming state changes
     private readonly object _receivingLock = new object();  // Lock for _isReceiving state changes
+    private long _connectionGeneration;
+    private long _reconnectAttemptCount;
+    private long _resumeAttemptCount;
+    private long _resumeSuccessCount;
+    private long _helloTimeoutTriggerCount;
+    private int _activeHeartbeatLoops;
+    private int _activeHelloTimeoutMonitors;
+    private int _activePongTimeoutMonitors;
     private const int BaseHeartbeatIntervalSeconds = 30; // 基础心跳间隔 30 秒
     private const int HeartbeatRandomOffsetMs = 2000; // 心跳随机偏移 +/- 5 秒 (5000毫秒)
     private const int HeartbeatPongTimeoutSeconds = 6; // PONG 超时 6 秒
@@ -68,6 +79,7 @@ public class KookWebSocketClient
     public async Task StartAsync()
     {
         _cancellationTokenSource = new CancellationTokenSource();
+        ResetConnectionDiagnostics();
         Logger.Log("🚀 WebSocket client starting...");
         try
         {
@@ -85,12 +97,23 @@ public class KookWebSocketClient
 
     public async Task StopAsync()
     {
+        var heartbeatTask = _heartbeatLoopTask;
         try
         {
             _cancellationTokenSource?.Cancel();
-            _heartbeatTimer?.Dispose();
-            _heartbeatTimer = null;
+            CancelHelloTimeoutMonitor();
+            CancelHeartbeatLoop();
             await CloseWebSocketAsync();
+            if (heartbeatTask != null)
+            {
+                try
+                {
+                    await heartbeatTask;
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }
         }
         finally
         {
@@ -126,10 +149,10 @@ public class KookWebSocketClient
                 Logger.Log("🔄 Get Websocket URL: " + _gatewayUrl);
 
                 // Step 2: 连接Gateway
-                await ConnectWebSocketAsync();
+                var generation = await ConnectWebSocketAsync();
 
                 // Step 3: 等待Hello包并开始接收事件
-                await StartReceivingAsync();
+                await StartReceivingAsync(generation);
 
                 // 如果 StartReceivingAsync 返回，说明接收循环已停止，需要重新连接
                 Logger.LogWarning("⚠️ Receive loop stopped, attempting to reconnect...");
@@ -174,17 +197,31 @@ public class KookWebSocketClient
         }
     }
 
-    private async Task ConnectWebSocketAsync()
+    private async Task<long> ConnectWebSocketAsync()
     {
         await CloseWebSocketAsync();
 
-        _webSocket = new ClientWebSocket();
-        await _webSocket.ConnectAsync(new Uri(_gatewayUrl), _cancellationTokenSource.Token);
+        var generation = Interlocked.Increment(ref _connectionGeneration);
+        ClientWebSocket newWebSocket = null;
 
-        Logger.Log("✅ KOOK gateway connection successful: " + _gatewayUrl);
+        try
+        {
+            newWebSocket = new ClientWebSocket();
+            await newWebSocket.ConnectAsync(new Uri(_gatewayUrl), _cancellationTokenSource.Token);
+            _webSocket = newWebSocket;
+
+            Logger.Log("✅ KOOK gateway connection successful: " + _gatewayUrl);
+            LogDebugState($"connect:generation-{generation}");
+            return generation;
+        }
+        catch
+        {
+            newWebSocket?.Dispose();
+            throw;
+        }
     }
 
-    private async Task StartReceivingAsync()
+    private async Task StartReceivingAsync(long expectedGeneration)
     {
         // 防止多个接收循环同时运行 - 使用 lock 进行原子操作
         lock (_receivingLock)
@@ -199,8 +236,7 @@ public class KookWebSocketClient
         try
         {
             var buffer = new byte[ReceiveBufferSize];
-            SetupHelloTimeoutIfNeeded();
-            await RunReceiveLoopAsync(buffer);
+            await RunReceiveLoopAsync(buffer, expectedGeneration);
         }
         catch (Exception ex)
         {
@@ -218,7 +254,7 @@ public class KookWebSocketClient
     /// <summary>
     /// Sets up Hello packet timeout detection if this is a fresh connection.
     /// </summary>
-    private void SetupHelloTimeoutIfNeeded()
+    private void SetupHelloTimeoutIfNeeded(long generation)
     {
         bool isResuming;
         lock (_resumingLock)
@@ -229,41 +265,38 @@ public class KookWebSocketClient
         if (!isResuming && _sessionId == null)
         {
             Logger.Log("⏱️ Setting up Hello packet timeout detection (6 seconds)...");
-            _ = Task.Run(async () =>
+
+            CancellationTokenSource helloTimeoutCts;
+            lock (_helloTimeoutLock)
             {
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(HelloTimeoutSeconds), _cancellationTokenSource.Token);
-                    if (_sessionId == null)
-                    {
-                        Logger.LogError("❌ No Hello packet received within 6 seconds, triggering a complete reconnection...");
-                        await HandleReconnectAsync();
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    // 正常取消，忽略
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"❌ Hello timeout detection error occurred: {ex.Message}");
-                }
-            }, _cancellationTokenSource.Token);
+                _helloTimeoutCts?.Cancel();
+                _helloTimeoutCts?.Dispose();
+                _helloTimeoutCts = CreateLinkedTokenSource();
+                helloTimeoutCts = _helloTimeoutCts;
+            }
+
+            _ = MonitorHelloTimeoutAsync(generation, helloTimeoutCts.Token);
         }
     }
 
     /// <summary>
     /// Main receive loop that processes incoming WebSocket messages.
     /// </summary>
-    private async Task RunReceiveLoopAsync(byte[] buffer)
+    private async Task RunReceiveLoopAsync(byte[] buffer, long observedGeneration)
     {
         while (!_cancellationTokenSource.Token.IsCancellationRequested)
         {
+            SetupHelloTimeoutIfNeeded(observedGeneration);
+
             try
             {
                 if (_webSocket == null || _webSocket.State != WebSocketState.Open)
                 {
-                    // 连接已关闭，退出循环让主循环处理重连
+                    if (TryAdoptLatestConnectionGeneration(ref observedGeneration, "socket-not-open"))
+                    {
+                        continue;
+                    }
+
                     break;
                 }
 
@@ -275,14 +308,38 @@ public class KookWebSocketClient
             }
             catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
             {
+                if (TryAdoptLatestConnectionGeneration(ref observedGeneration, "connection-closed-prematurely"))
+                {
+                    continue;
+                }
+
+                var swappedGeneration = await WaitForSocketSwapAsync(observedGeneration, "connection-closed-prematurely");
+                if (swappedGeneration.HasValue)
+                {
+                    observedGeneration = swappedGeneration.Value;
+                    continue;
+                }
+
                 Logger.LogError("🔌 WebSocket connection unexpectedly disconnected");
-                await HandleReconnectAsync();
+                await HandleReconnectAsync(observedGeneration);
                 break; // 退出循环，让主循环重连
             }
             catch (WebSocketException ex)
             {
+                if (TryAdoptLatestConnectionGeneration(ref observedGeneration, "websocket-exception"))
+                {
+                    continue;
+                }
+
+                var swappedGeneration = await WaitForSocketSwapAsync(observedGeneration, "websocket-exception");
+                if (swappedGeneration.HasValue)
+                {
+                    observedGeneration = swappedGeneration.Value;
+                    continue;
+                }
+
                 Logger.LogError($"❌ WebSocket error: {ex.WebSocketErrorCode} - {ex.Message}");
-                await HandleReconnectAsync();
+                await HandleReconnectAsync(observedGeneration);
                 break; // 退出循环，让主循环重连
             }
             catch (OperationCanceledException)
@@ -291,10 +348,22 @@ public class KookWebSocketClient
             }
             catch (Exception ex)
             {
+                if (TryAdoptLatestConnectionGeneration(ref observedGeneration, "receive-exception"))
+                {
+                    continue;
+                }
+
+                var swappedGeneration = await WaitForSocketSwapAsync(observedGeneration, "receive-exception");
+                if (swappedGeneration.HasValue)
+                {
+                    observedGeneration = swappedGeneration.Value;
+                    continue;
+                }
+
                 Logger.LogError($"❌ Error occurred while receiving message: {ex.Message}");
                 if (_webSocket == null || _webSocket.State != WebSocketState.Open)
                 {
-                    await HandleReconnectAsync();
+                    await HandleReconnectAsync(observedGeneration);
                     break; // 退出循环，让主循环重连
                 }
                 await Task.Delay(1000, _cancellationTokenSource.Token);
@@ -420,9 +489,11 @@ public class KookWebSocketClient
 
                 if (payload.d != null)
                 {
+                    CancelHelloTimeoutMonitor();
                     _sessionId = payload.d.session_id;
                     Logger.Log($"✅ Session ID set: {_sessionId}");
-                    StartHeartbeat();
+                    var generation = Interlocked.Read(ref _connectionGeneration);
+                    StartHeartbeat(generation);
 
                     bool isResuming;
                     lock (_resumingLock)
@@ -432,7 +503,7 @@ public class KookWebSocketClient
 
                     if (!isResuming)
                     {
-                        await SendHeartbeatAsync();
+                        await SendHeartbeatAsync(generation, CancellationToken.None);
                     }
                 }
                 else
@@ -444,7 +515,7 @@ public class KookWebSocketClient
             case 3: // PONG - 心跳响应
                 // 使用Interlocked原子操作更新_lastPongReceivedTicks
                 Interlocked.Exchange(ref _lastPongReceivedTicks, DateTime.UtcNow.Ticks);
-                _pongTimeoutCts?.Cancel(); // 重要：收到PONG时，取消当前超时检测任务
+                CancelPongTimeoutMonitor();
                 if (IsDebugEnabled)
                 {
                     Logger.Log("[DEBUG] Received heartbeat response");
@@ -462,6 +533,8 @@ public class KookWebSocketClient
                 {
                     _isResuming = false;
                 }
+                Interlocked.Increment(ref _resumeSuccessCount);
+                LogDebugState("resume-ack");
                 break;
         }
     }
@@ -519,7 +592,7 @@ public class KookWebSocketClient
                 : $"{sanitizedNickname}: {sanitizedContent}";
 
             Logger.Log("🗨️ Forward to game: " + formatted);
-            Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+            if (!MainThreadDispatcherGuard.TryQueue(() =>
             {
                 try
                 {
@@ -537,13 +610,16 @@ public class KookWebSocketClient
                 {
                     Logger.LogError($"❌ Failed to send message to game: {ex.Message}");
                 }
-            });
+            }))
+            {
+                Logger.LogWarning($"⚠️ Main thread dispatcher is saturated, drop KOOK message from {sanitizedNickname}");
+            }
         }
     }
 
-    private void StartHeartbeat()
+    private void StartHeartbeat(long generation)
     {
-        _heartbeatTimer?.Dispose();
+        CancelHeartbeatLoop();
         // 使用Interlocked原子操作初始化_lastPongReceivedTicks
         Interlocked.Exchange(ref _lastPongReceivedTicks, DateTime.UtcNow.Ticks);
 
@@ -559,28 +635,39 @@ public class KookWebSocketClient
         // 确保间隔不会过短，例如至少 1 秒
         if (adjustedInterval < 1000) adjustedInterval = 1000;
 
-        _heartbeatTimer = new Timer(async _ => await SendHeartbeatAsync(), null,
-            TimeSpan.FromMilliseconds(adjustedInterval), TimeSpan.FromMilliseconds(adjustedInterval));
-        if (IsDebugEnabled) {
+        var heartbeatLoopCts = CreateLinkedTokenSource();
+        _heartbeatLoopCts = heartbeatLoopCts;
+        _heartbeatLoopTask = RunHeartbeatLoopAsync(generation, adjustedInterval, heartbeatLoopCts.Token);
+
+        if (IsDebugEnabled)
+        {
             Logger.Log($"💓 Heartbeat timer started, interval: {adjustedInterval}ms");
         }
-            
     }
 
-    private async Task SendHeartbeatAsync()
+    private async Task SendHeartbeatAsync(long generation, CancellationToken cancellationToken, bool trackPongTimeout = true)
     {
-        if (_webSocket?.State != WebSocketState.Open) return;
+        if (!IsCurrentConnectionGeneration(generation) || _webSocket?.State != WebSocketState.Open)
+        {
+            return;
+        }
 
         try
         {
             // 取消之前可能存在的PONG超时检测任务，并安全地创建新的 CTS
-            CancellationToken pongToken;
-            lock (_pongTimeoutLock)
+            if (trackPongTimeout)
             {
-                _pongTimeoutCts?.Cancel();
-                _pongTimeoutCts?.Dispose();
-                _pongTimeoutCts = new CancellationTokenSource();
-                pongToken = _pongTimeoutCts.Token;  // 在 lock 内获取 Token
+                CancellationToken pongToken;
+                lock (_pongTimeoutLock)
+                {
+                    _pongTimeoutCts?.Cancel();
+                    _pongTimeoutCts?.Dispose();
+                    _pongTimeoutCts = new CancellationTokenSource();
+                    pongToken = _pongTimeoutCts.Token;  // 在 lock 内获取 Token
+                }
+
+                // Start PONG timeout detection without Task.Run - use async pattern directly
+                _ = MonitorHeartbeatTimeoutAsync(generation, pongToken);
             }
 
             // 使用Interlocked原子操作读取_lastSequenceNumber
@@ -591,20 +678,17 @@ public class KookWebSocketClient
             {
                 Logger.Log("[DEBUG] Send heartbeat packet");
             }
-
-
-            // Start PONG timeout detection without Task.Run - use async pattern directly
-            _ = MonitorHeartbeatTimeoutAsync(pongToken);
         }
         catch (Exception ex)
         {
             Logger.LogError($"❌ Send HeartBeat Failed: {ex.Message}");
-            await HandleReconnectAsync();
+            await HandleReconnectAsync(generation);
         }
     }
 
-    private async Task MonitorHeartbeatTimeoutAsync(CancellationToken cancellationToken)
+    private async Task MonitorHeartbeatTimeoutAsync(long generation, CancellationToken cancellationToken)
     {
+        Interlocked.Increment(ref _activePongTimeoutMonitors);
         try
         {
             // 使用新的CancellationTokenSource的Token
@@ -614,10 +698,11 @@ public class KookWebSocketClient
             // 再次确认_lastPongReceivedTicks，以防万一，但CTS是主要控制方式
             var lastPongTicks = Interlocked.Read(ref _lastPongReceivedTicks);
             var lastPong = new DateTime(lastPongTicks);
-            if (DateTime.UtcNow - lastPong > TimeSpan.FromSeconds(HeartbeatPongTimeoutSeconds))
+            if (IsCurrentConnectionGeneration(generation) &&
+                DateTime.UtcNow - lastPong > TimeSpan.FromSeconds(HeartbeatPongTimeoutSeconds))
             {
                 Logger.Log("⚠️ Heartbeat timeout, start reconnection process...");
-                await HandleHeartbeatTimeoutAsync();
+                await HandleHeartbeatTimeoutAsync(generation);
             }
         }
         catch (OperationCanceledException)
@@ -628,22 +713,36 @@ public class KookWebSocketClient
         {
             Logger.LogError($"❌ PONG timeout detection error occurred: {ex.Message}");
         }
+        finally
+        {
+            Interlocked.Decrement(ref _activePongTimeoutMonitors);
+        }
     }
 
-    private async Task HandleHeartbeatTimeoutAsync()
+    private async Task HandleHeartbeatTimeoutAsync(long generation)
     {
+        if (!IsCurrentConnectionGeneration(generation))
+        {
+            return;
+        }
+
         await _reconnectSemaphore.WaitAsync();
         try
         {
+            if (!IsCurrentConnectionGeneration(generation))
+            {
+                return;
+            }
+
             // Step 5: 先发两次心跳ping测试连接
-            if (await TestConnectionWithPingsAsync())
+            if (await TestConnectionWithPingsAsync(generation))
             {
                 Logger.Log("✅ Connection test successful, restored to normal");
                 return;
             }
 
             // Step 6: 尝试Resume
-            if (await TryResumeAsync())
+            if (await TryResumeAsync(generation))
             {
                 Logger.Log("✅ Resume successful");
                 return;
@@ -659,7 +758,7 @@ public class KookWebSocketClient
         }
     }
 
-    private async Task<bool> TestConnectionWithPingsAsync()
+    private async Task<bool> TestConnectionWithPingsAsync(long generation)
     {
         Logger.Log("🏓 Start connection testing...");
 
@@ -667,11 +766,15 @@ public class KookWebSocketClient
         {
             try
             {
-                var testPing = DateTime.UtcNow;
-                await SendHeartbeatAsync();
+                if (!IsCurrentConnectionGeneration(generation))
+                {
+                    return false;
+                }
+
+                await SendHeartbeatAsync(generation, CancellationToken.None, trackPongTimeout: false);
 
                 int delay = i == 0 ? 2000 : 4000; // 间隔2s, 4s
-                await Task.Delay(delay);
+                await Task.Delay(delay, _cancellationTokenSource.Token);
 
                 // 使用Interlocked原子操作读取_lastPongReceivedTicks
                 var lastPongTicks = Interlocked.Read(ref _lastPongReceivedTicks);
@@ -690,7 +793,7 @@ public class KookWebSocketClient
         return false;
     }
 
-    private async Task<bool> TryResumeAsync()
+    private async Task<bool> TryResumeAsync(long generation)
     {
         Logger.Log("🔄 Attempt to Resume Connection...");
 
@@ -698,23 +801,33 @@ public class KookWebSocketClient
         {
             try
             {
+                if (!IsCurrentConnectionGeneration(generation))
+                {
+                    return false;
+                }
+
+                SetResuming(true);
+                Interlocked.Increment(ref _resumeAttemptCount);
                 if (!await TryGetGatewayUrlForResumeAsync(i))
                 {
+                    SetResuming(false);
                     continue;
                 }
 
-                await ConnectWebSocketAsync();
+                var resumeGeneration = await ConnectWebSocketAsync();
                 await SendResumePayloadAsync();
 
-                if (await WaitForResumeAckAsync())
+                if (await WaitForResumeAckAsync(resumeGeneration))
                 {
                     return true;
                 }
 
+                SetResuming(false);
                 await CloseWebSocketAsync();
             }
             catch (Exception ex)
             {
+                SetResuming(false);
                 Logger.LogError($"❌ Resume 失败 (尝试 {i + 1}/2): {ex.Message}");
                 await CloseWebSocketAsync();
             }
@@ -752,10 +865,7 @@ public class KookWebSocketClient
     /// </summary>
     private async Task SendResumePayloadAsync()
     {
-        lock (_resumingLock)
-        {
-            _isResuming = true;
-        }
+        SetResuming(true);
 
         var resumePayload = new
         {
@@ -780,9 +890,9 @@ public class KookWebSocketClient
     /// Waits for RESUME_ACK response.
     /// </summary>
     /// <returns>True if resume was acknowledged, false otherwise.</returns>
-    private async Task<bool> WaitForResumeAckAsync()
+    private async Task<bool> WaitForResumeAckAsync(long expectedGeneration)
     {
-        await Task.Delay(ResumeResponseWaitMs);
+        await Task.Delay(ResumeResponseWaitMs, _cancellationTokenSource.Token);
 
         bool isResuming;
         lock (_resumingLock)
@@ -790,13 +900,15 @@ public class KookWebSocketClient
             isResuming = _isResuming;
         }
 
-        if (_webSocket != null && _webSocket.State == WebSocketState.Open && !isResuming)
+        if (IsCurrentConnectionGeneration(expectedGeneration) &&
+            _webSocket != null &&
+            _webSocket.State == WebSocketState.Open &&
+            !isResuming)
         {
             if (IsDebugEnabled)
             {
                 Logger.Log("[DEBUG] Resume successful, connection has been restored");
             }
-            _ = StartReceivingAsync();
             return true;
         }
 
@@ -808,8 +920,13 @@ public class KookWebSocketClient
         return false;
     }
 
-    private async Task HandleReconnectAsync()
+    private async Task HandleReconnectAsync(long generation)
     {
+        if (!IsCurrentConnectionGeneration(generation))
+        {
+            return;
+        }
+
         // 使用同一个信号量保护所有重连操作，防止任务堆积
         if (!await _reconnectSemaphore.WaitAsync(0))
         {
@@ -819,10 +936,15 @@ public class KookWebSocketClient
 
         try
         {
-            _heartbeatTimer?.Dispose();
-            _heartbeatTimer = null;
+            if (!IsCurrentConnectionGeneration(generation))
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref _reconnectAttemptCount);
             // 关闭当前连接，让 ConnectWithRetryAsync 的主循环检测到并重连
             await CloseWebSocketAsync();
+            LogDebugState("reconnect-requested");
         }
         finally
         {
@@ -840,7 +962,7 @@ public class KookWebSocketClient
             _isResuming = false;
         }
 
-        await HandleReconnectAsync();
+        await HandleReconnectAsync(Interlocked.Read(ref _connectionGeneration));
     }
 
     private async Task InfiniteRetryAsync()
@@ -883,12 +1005,194 @@ public class KookWebSocketClient
 
 
 
+    private async Task MonitorHelloTimeoutAsync(long generation, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _activeHelloTimeoutMonitors);
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(HelloTimeoutSeconds), cancellationToken);
+            if (IsCurrentConnectionGeneration(generation) && _sessionId == null)
+            {
+                Interlocked.Increment(ref _helloTimeoutTriggerCount);
+                Logger.LogError("❌ No Hello packet received within 6 seconds, triggering a complete reconnection...");
+                await HandleReconnectAsync(generation);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"❌ Hello timeout detection error occurred: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeHelloTimeoutMonitors);
+        }
+    }
+
+    private async Task RunHeartbeatLoopAsync(long generation, int intervalMs, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _activeHeartbeatLoops);
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested && !(_cancellationTokenSource?.IsCancellationRequested ?? true))
+            {
+                await Task.Delay(intervalMs, cancellationToken);
+                if (!IsCurrentConnectionGeneration(generation))
+                {
+                    break;
+                }
+
+                await SendHeartbeatAsync(generation, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"❌ Heartbeat loop failed: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeHeartbeatLoops);
+        }
+    }
+
+    private void CancelPongTimeoutMonitor()
+    {
+        lock (_pongTimeoutLock)
+        {
+            _pongTimeoutCts?.Cancel();
+            _pongTimeoutCts?.Dispose();
+            _pongTimeoutCts = null;
+        }
+    }
+
+    private void CancelHelloTimeoutMonitor()
+    {
+        lock (_helloTimeoutLock)
+        {
+            _helloTimeoutCts?.Cancel();
+            _helloTimeoutCts?.Dispose();
+            _helloTimeoutCts = null;
+        }
+    }
+
+    private void CancelHeartbeatLoop()
+    {
+        _heartbeatLoopCts?.Cancel();
+        _heartbeatLoopCts?.Dispose();
+        _heartbeatLoopCts = null;
+        _heartbeatLoopTask = null;
+    }
+
+    private CancellationTokenSource CreateLinkedTokenSource()
+    {
+        return _cancellationTokenSource == null
+            ? new CancellationTokenSource()
+            : CancellationTokenSource.CreateLinkedTokenSource(_cancellationTokenSource.Token);
+    }
+
+    private bool IsCurrentConnectionGeneration(long generation)
+    {
+        return generation == Interlocked.Read(ref _connectionGeneration);
+    }
+
+    private bool TryAdoptLatestConnectionGeneration(ref long observedGeneration, string reason)
+    {
+        var latestGeneration = Interlocked.Read(ref _connectionGeneration);
+        if (latestGeneration == observedGeneration || _webSocket == null || _webSocket.State != WebSocketState.Open)
+        {
+            return false;
+        }
+
+        observedGeneration = latestGeneration;
+        if (IsDebugEnabled)
+        {
+            Logger.Log($"[DEBUG] Receive loop adopted connection generation {observedGeneration} after {reason}");
+        }
+
+        return true;
+    }
+
+    private async Task<long?> WaitForSocketSwapAsync(long observedGeneration, string reason)
+    {
+        if (!IsResumingConnection())
+        {
+            return null;
+        }
+
+        try
+        {
+            await Task.Delay(250, _cancellationTokenSource.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+
+        return TryAdoptLatestConnectionGeneration(ref observedGeneration, $"{reason}:wait")
+            ? observedGeneration
+            : null;
+    }
+
+    private bool IsResumingConnection()
+    {
+        lock (_resumingLock)
+        {
+            return _isResuming;
+        }
+    }
+
+    private void SetResuming(bool isResuming)
+    {
+        lock (_resumingLock)
+        {
+            _isResuming = isResuming;
+        }
+    }
+
+    private void ResetConnectionDiagnostics()
+    {
+        Interlocked.Exchange(ref _connectionGeneration, 0);
+        Interlocked.Exchange(ref _reconnectAttemptCount, 0);
+        Interlocked.Exchange(ref _resumeAttemptCount, 0);
+        Interlocked.Exchange(ref _resumeSuccessCount, 0);
+        Interlocked.Exchange(ref _helloTimeoutTriggerCount, 0);
+        Interlocked.Exchange(ref _activeHeartbeatLoops, 0);
+        Interlocked.Exchange(ref _activeHelloTimeoutMonitors, 0);
+        Interlocked.Exchange(ref _activePongTimeoutMonitors, 0);
+    }
+
+    private void LogDebugState(string reason)
+    {
+        if (!IsDebugEnabled)
+        {
+            return;
+        }
+
+        Logger.Log(
+            $"[DEBUG] WebSocket diagnostics ({reason}): generation={Interlocked.Read(ref _connectionGeneration)}, " +
+            $"reconnects={Interlocked.Read(ref _reconnectAttemptCount)}, resumeAttempts={Interlocked.Read(ref _resumeAttemptCount)}, " +
+            $"resumeSuccesses={Interlocked.Read(ref _resumeSuccessCount)}, helloTimeouts={Interlocked.Read(ref _helloTimeoutTriggerCount)}, " +
+            $"receiving={_isReceiving}, activeHeartbeatLoops={Volatile.Read(ref _activeHeartbeatLoops)}, " +
+            $"activeHelloTimeouts={Volatile.Read(ref _activeHelloTimeoutMonitors)}, activePongTimeouts={Volatile.Read(ref _activePongTimeoutMonitors)}");
+    }
+
     private async Task SendMessageAsync(string message)
     {
+        var cancellationTokenSource = _cancellationTokenSource;
+        if (cancellationTokenSource == null)
+        {
+            return;
+        }
+
         if (_webSocket?.State == WebSocketState.Open)
         {
             var bytes = Encoding.UTF8.GetBytes(message);
-            await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cancellationTokenSource.Token);
+            await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cancellationTokenSource.Token);
         }
     }
 
@@ -896,27 +1200,20 @@ public class KookWebSocketClient
     {
         try
         {
-            // 释放心跳定时器
-            _heartbeatTimer?.Dispose();
-            _heartbeatTimer = null;
-
-            // 释放Pong超时CTS
-            lock (_pongTimeoutLock)
-            {
-                _pongTimeoutCts?.Cancel();
-                _pongTimeoutCts?.Dispose();
-                _pongTimeoutCts = null;
-            }
+            CancelHeartbeatLoop();
+            CancelHelloTimeoutMonitor();
+            CancelPongTimeoutMonitor();
 
             // 释放WebSocket
-            if (_webSocket != null)
+            var webSocket = _webSocket;
+            _webSocket = null;
+            if (webSocket != null)
             {
-                if (_webSocket.State == WebSocketState.Open)
+                if (webSocket.State == WebSocketState.Open)
                 {
-                    await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+                    await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
                 }
-                _webSocket.Dispose();
-                _webSocket = null;
+                webSocket.Dispose();
             }
 
             // 不释放主CTS - 它在StartAsync中创建，在StopAsync中释放

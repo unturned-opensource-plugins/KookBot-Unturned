@@ -23,14 +23,17 @@ namespace Emqo.KookBot_Unturned
         private string _configFilePath;
         private static DateTimeOffset _startedAt;
         private IConfigurationProvider _configProvider;
+        private bool _isFullyLoaded;
 
         protected override async void Load()
         {
+            var loadCompleted = false;
             try
             {
                 Logger.Log("🔍 KookBot-Unturned plugin loading...");
 
                 Instance = this;
+                _isFullyLoaded = false;
                 _startedAt = DateTimeOffset.UtcNow;
                 _configProvider = new DefaultConfigurationProvider(() => Configuration?.Instance);
 
@@ -134,6 +137,8 @@ namespace Emqo.KookBot_Unturned
                 }
 
                 Logger.Log("✅ KookBot-Unturned plugin loaded successfully");
+                _isFullyLoaded = true;
+                loadCompleted = true;
             }
             catch (Exception ex)
             {
@@ -144,13 +149,20 @@ namespace Emqo.KookBot_Unturned
                 }
                 Logger.LogError($"Stack trace: {ex.StackTrace}");
             }
+            finally
+            {
+                if (!loadCompleted)
+                {
+                    await CleanupAfterFailedLoadAsync();
+                }
+            }
         }
 
         protected override async void Unload()
         {
             try
             {
-                if (Configuration.Instance.IsGameToKookEnabled("ServerStart"))
+                if (_isFullyLoaded && _kookMessageApi != null && Configuration.Instance.IsGameToKookEnabled("ServerStart"))
                 {
                     try
                     {
@@ -172,11 +184,18 @@ namespace Emqo.KookBot_Unturned
                 if (_client != null)
                 {
                     await _client.StopAsync();
+                    _client = null;
                 }
 
                 ConfigurationHotReloadService.Stop();
                 Events.Shutdown();
                 ChatModerationManager.Shutdown();
+                Commands.Init(null);
+                _kookMessageApi = null;
+                _configProvider = null;
+                authid = "";
+                _isFullyLoaded = false;
+                Instance = null;
                 Logger.Log("✅ Plugin unloaded successfully");
             }
             catch (Exception ex)
@@ -233,6 +252,45 @@ namespace Emqo.KookBot_Unturned
             }
 
             return DateTimeOffset.UtcNow - _startedAt;
+        }
+
+        private async Task CleanupAfterFailedLoadAsync()
+        {
+            try
+            {
+                Logger.LogWarning("⚠️ Plugin load did not complete, cleaning up partial initialization...");
+
+                if (_client != null)
+                {
+                    try
+                    {
+                        await _client.StopAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"❌ Failed to stop WebSocket client during failed load cleanup: {ex.Message}");
+                    }
+                    finally
+                    {
+                        _client = null;
+                    }
+                }
+
+                ConfigurationHotReloadService.Stop();
+                Events.Shutdown();
+                ChatModerationManager.Shutdown();
+                Commands.Init(null);
+
+                _kookMessageApi = null;
+                _configProvider = null;
+                authid = "";
+                _isFullyLoaded = false;
+                Instance = null;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"❌ Failed to clean up after unsuccessful plugin load: {ex.Message}");
+            }
         }
     }
 }

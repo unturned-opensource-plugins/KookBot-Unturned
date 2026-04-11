@@ -35,6 +35,25 @@ namespace Emqo.KookBot_Unturned
         private const int MaxCacheSize = 1000; // 最大缓存条目数，防止无限增长
         private const int CacheCleanupIntervalMs = 60000; // 每60秒清理一次过期缓存
         private static long _lastCacheCleanupTicks = 0;
+        private const int MaxConcurrentKookSends = 4;
+        private const int MaxPendingKookSends = 128;
+        private static readonly SemaphoreSlim _kookSendSemaphore = new(MaxConcurrentKookSends, MaxConcurrentKookSends);
+        private static int _pendingKookSendCount;
+        private static CancellationTokenSource _kookSendCancellationTokenSource = new CancellationTokenSource();
+        private const int DiagnosticsLogIntervalMs = 60000;
+        private static long _lastDiagnosticsLogTicks;
+        private static long _kookSendSuccessCount;
+        private static long _kookSendCanceledCount;
+        private static long _kookSendDroppedCount;
+        private static long _pvpEventsReceivedCount;
+        private static long _pvpEventsDisabledCount;
+        private static long _pvpEventsInvalidPlayerCount;
+        private static long _pvpEventsSelfDamageSkippedCount;
+        private static long _pvpEventsLowDamageSkippedCount;
+        private static long _pvpEventsQueuedCount;
+        private static long _pvpEventsSentCount;
+        private static long _pvpEventsFailedCount;
+        private static long _pvpEventsBacklogDropCount;
 
         // 配置属性快捷访问
         private static KookBot_UnturnedConfiguration Config =>
@@ -177,6 +196,8 @@ namespace Emqo.KookBot_Unturned
             _message = message;
             _channelId = channelId;
             _configProvider = configProvider ?? new DefaultConfigurationProvider(() => KookBot_UnturnedPlugin.Instance?.Configuration?.Instance);
+            ResetKookSendCancellation();
+            ResetRuntimeState();
 
             // 注册所有事件
             RegisterEvents();
@@ -202,6 +223,10 @@ namespace Emqo.KookBot_Unturned
         {
             // 注销所有事件
             UnregisterEvents();
+            CancelKookSends();
+            ResetRuntimeState();
+            _message = null;
+            _channelId = null;
             if (ShouldLogDebug)
             {
                 Logger.Log("🔇 Events system shutdown");
@@ -321,8 +346,10 @@ namespace Emqo.KookBot_Unturned
                     DateTimeOffset.Now,
                     "success");
 
-                await _message.CreateMessageAsync(10, _channelId, card);
-                if (ShouldLogDebug)
+                var sent = await SendBoundedKookMessageAsync(
+                    async () => await _message.CreateMessageAsync(10, _channelId, card),
+                    "PlayerConnected");
+                if (sent && ShouldLogDebug)
                 {
                     Logger.Log($"📤 Player join event sent to KOOK: {playerName}");
                 }
@@ -380,8 +407,10 @@ namespace Emqo.KookBot_Unturned
                     DateTimeOffset.Now,
                     "warning");
 
-                await _message.CreateMessageAsync(10, _channelId, card);
-                if (ShouldLogDebug)
+                var sent = await SendBoundedKookMessageAsync(
+                    async () => await _message.CreateMessageAsync(10, _channelId, card),
+                    "PlayerDisconnected");
+                if (sent && ShouldLogDebug)
                 {
                     Logger.Log($"📤 Player disconnect event sent to KOOK: {playerName}");
                 }
@@ -495,9 +524,11 @@ namespace Emqo.KookBot_Unturned
                     Logger.Log($"🔍 Sending death card to KOOK for {playerName}");
                 }
 
-                await _message.CreateMessageAsync(10, _channelId, deathCard);
+                var sent = await SendBoundedKookMessageAsync(
+                    async () => await _message.CreateMessageAsync(10, _channelId, deathCard),
+                    "PlayerDeath");
 
-                if (ShouldLogDebug)
+                if (sent && ShouldLogDebug)
                 {
                     Logger.Log($"📤 Player death event sent to KOOK: {playerName} - {cause}");
                 }
@@ -552,8 +583,10 @@ namespace Emqo.KookBot_Unturned
                 }
 
                 var reviveCard = KookApi.KookCardFactory.BuildGenericEventCard("🔄", "玩家复活", reviveFields, DateTimeOffset.Now, "success");
-                await _message.CreateMessageAsync(10, _channelId, reviveCard);
-                if (ShouldLogDebug)
+                var sent = await SendBoundedKookMessageAsync(
+                    async () => await _message.CreateMessageAsync(10, _channelId, reviveCard),
+                    "PlayerRevive");
+                if (sent && ShouldLogDebug)
                 {
                     Logger.Log($"📤 Player revive event sent to KOOK: {playerName}");
                 }
@@ -634,7 +667,9 @@ namespace Emqo.KookBot_Unturned
                 };
 
                 var muteCard = KookApi.KookCardFactory.BuildGenericEventCard("🚫", "自动禁言", muteFields, DateTimeOffset.Now, "warning");
-                await _message.CreateMessageAsync(10, _channelId, muteCard);
+                await SendBoundedKookMessageAsync(
+                    async () => await _message.CreateMessageAsync(10, _channelId, muteCard),
+                    "AutoMuteNotification");
             }
             catch (Exception ex)
             {
@@ -685,8 +720,10 @@ namespace Emqo.KookBot_Unturned
                 var statusTag = isFiltered ? " 🚫" : "";
                 var card = KookApi.KookCardFactory.BuildChatMessageCard(chatModeText, playerName, processedMessage, DateTimeOffset.Now, statusTag);
 
-                await _message.CreateMessageAsync(10, _channelId, card);
-                if (ShouldLogDebug)
+                var sent = await SendBoundedKookMessageAsync(
+                    async () => await _message.CreateMessageAsync(10, _channelId, card),
+                    "ChatMessage");
+                if (sent && ShouldLogDebug)
                 {
                     Logger.Log($"📤 Chat message sent to KOOK: [{chatMode}] {playerName}: {processedMessage}");
                 }
@@ -703,9 +740,15 @@ namespace Emqo.KookBot_Unturned
 
         private static void OnPlayerDamaged(ref DamagePlayerParameters parameters, ref bool shouldAllow)
         {
+            Interlocked.Increment(ref _pvpEventsReceivedCount);
+
             // 检查事件是否启用
             if (!shouldAllow || !CheckEventEnabled("PlayerDamaged"))
+            {
+                Interlocked.Increment(ref _pvpEventsDisabledCount);
+                MaybeLogDiagnostics("PlayerDamaged:disabled");
                 return;
+            }
 
             try
             {
@@ -713,16 +756,35 @@ namespace Emqo.KookBot_Unturned
 
                 // 在同步上下文中提前获取所有玩家数据，避免异步执行时玩家对象被销毁
                 if (copiedParameters.player?.channel?.owner?.playerID == null)
+                {
+                    Interlocked.Increment(ref _pvpEventsInvalidPlayerCount);
+                    MaybeLogDiagnostics("PlayerDamaged:invalid-player");
                     return;
+                }
 
                 var victim = UnturnedPlayer.FromCSteamID(copiedParameters.player.channel.owner.playerID.steamID);
                 var attacker = UnturnedPlayer.FromCSteamID(copiedParameters.killer);
 
-                if (victim == null || attacker == null || victim.CSteamID == attacker.CSteamID)
+                if (victim == null || attacker == null)
+                {
+                    Interlocked.Increment(ref _pvpEventsInvalidPlayerCount);
+                    MaybeLogDiagnostics("PlayerDamaged:lookup-null");
                     return;
+                }
+
+                if (victim.CSteamID == attacker.CSteamID)
+                {
+                    Interlocked.Increment(ref _pvpEventsSelfDamageSkippedCount);
+                    MaybeLogDiagnostics("PlayerDamaged:self");
+                    return;
+                }
 
                 if (copiedParameters.damage < 50 && victim.Health > copiedParameters.damage)
+                {
+                    Interlocked.Increment(ref _pvpEventsLowDamageSkippedCount);
+                    MaybeLogDiagnostics("PlayerDamaged:low-damage");
                     return;
+                }
 
                 // 在同步上下文中获取所有需要的数据
                 var victimName = GetPlayerName(victim);
@@ -731,11 +793,14 @@ namespace Emqo.KookBot_Unturned
                 var limbText = GetLimbText(copiedParameters.limb);
 
                 // Fire and forget with exception handling
+                Interlocked.Increment(ref _pvpEventsQueuedCount);
                 SafeFireAndForget(OnPlayerDamagedAsync(copiedParameters, victimName, attackerName, victimHealth, limbText), "PlayerDamaged");
             }
             catch (Exception ex)
             {
+                Interlocked.Increment(ref _pvpEventsFailedCount);
                 Logger.LogError($"Error in OnPlayerDamaged: {ex.Message}");
+                MaybeLogDiagnostics("PlayerDamaged:error");
             }
         }
 
@@ -762,19 +827,24 @@ namespace Emqo.KookBot_Unturned
                 }
 
                 var pvpCard = KookApi.KookCardFactory.BuildGenericEventCard("⚔️", "PvP 事件", pvpFields, DateTimeOffset.Now, "warning");
-                await _message.CreateMessageAsync(10, _channelId, pvpCard);
-                if (ShouldLogDebug)
+                var sent = await SendBoundedKookMessageAsync(
+                    async () => await _message.CreateMessageAsync(10, _channelId, pvpCard),
+                    "PlayerDamaged");
+                if (sent && ShouldLogDebug)
                 {
                     Logger.Log($"📤 PvP event sent to KOOK: {attackerName} -> {victimName} ({copiedParameters.damage} damage)");
                 }
             }
             catch (Exception ex)
             {
+                Interlocked.Increment(ref _pvpEventsFailedCount);
                 Logger.LogError($"Error sending PvP event: {ex.Message}");
                 if (ShouldLogDebug)
                 {
                     Logger.LogError($"Stack trace: {ex.StackTrace}");
                 }
+
+                MaybeLogDiagnostics("PlayerDamaged:send-error");
             }
         }
 
@@ -948,8 +1018,10 @@ namespace Emqo.KookBot_Unturned
                     string.IsNullOrWhiteSpace(eventContent) ? "_(无详细内容)_" : eventContent,
                     DateTimeOffset.Now,
                     "secondary");
-                await _message.CreateMessageAsync(10, _channelId, card);
-                if (ShouldLogDebug)
+                var sent = await SendBoundedKookMessageAsync(
+                    async () => await _message.CreateMessageAsync(10, _channelId, card),
+                    "CustomEvent");
+                if (sent && ShouldLogDebug)
                 {
                     Logger.Log($"📤 Custom event sent to KOOK: {eventTitle}");
                 }
@@ -961,5 +1033,158 @@ namespace Emqo.KookBot_Unturned
         }
 
         #endregion
+
+        private static async Task<bool> SendBoundedKookMessageAsync(Func<Task> sendOperation, string context)
+        {
+            if (sendOperation == null)
+            {
+                throw new ArgumentNullException(nameof(sendOperation));
+            }
+
+            if (!TryReserveKookSendSlot(context))
+            {
+                return false;
+            }
+
+            bool semaphoreAcquired = false;
+            var cancellationTokenSource = _kookSendCancellationTokenSource;
+
+            try
+            {
+                if (cancellationTokenSource == null || cancellationTokenSource.IsCancellationRequested)
+                {
+                    return false;
+                }
+
+                await _kookSendSemaphore.WaitAsync(cancellationTokenSource.Token);
+                semaphoreAcquired = true;
+
+                if (cancellationTokenSource.IsCancellationRequested)
+                {
+                    return false;
+                }
+
+                await sendOperation();
+                Interlocked.Increment(ref _kookSendSuccessCount);
+                if (IsPvpContext(context))
+                {
+                    Interlocked.Increment(ref _pvpEventsSentCount);
+                }
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                Interlocked.Increment(ref _kookSendCanceledCount);
+                if (ShouldLogDebug)
+                {
+                    Logger.Log($"ℹ️ KOOK send canceled during shutdown: {context}");
+                }
+
+                return false;
+            }
+            finally
+            {
+                if (semaphoreAcquired)
+                {
+                    _kookSendSemaphore.Release();
+                }
+
+                Interlocked.Decrement(ref _pendingKookSendCount);
+                MaybeLogDiagnostics(context);
+            }
+        }
+
+        private static bool TryReserveKookSendSlot(string context)
+        {
+            while (true)
+            {
+                var current = Volatile.Read(ref _pendingKookSendCount);
+                if (current >= MaxPendingKookSends)
+                {
+                    Interlocked.Increment(ref _kookSendDroppedCount);
+                    if (IsPvpContext(context))
+                    {
+                        Interlocked.Increment(ref _pvpEventsBacklogDropCount);
+                    }
+
+                    Logger.LogWarning($"⚠️ KOOK send backlog reached {current}, dropping event: {context}");
+                    MaybeLogDiagnostics($"{context}:backlog-drop");
+                    return false;
+                }
+
+                if (Interlocked.CompareExchange(ref _pendingKookSendCount, current + 1, current) == current)
+                {
+                    return true;
+                }
+            }
+        }
+
+        private static void CancelKookSends()
+        {
+            _kookSendCancellationTokenSource?.Cancel();
+        }
+
+        private static void ResetKookSendCancellation()
+        {
+            var replacement = new CancellationTokenSource();
+            var previous = Interlocked.Exchange(ref _kookSendCancellationTokenSource, replacement);
+            previous?.Cancel();
+            previous?.Dispose();
+        }
+
+        private static bool IsPvpContext(string context)
+        {
+            return string.Equals(context, "PlayerDamaged", StringComparison.Ordinal);
+        }
+
+        private static void ResetRuntimeState()
+        {
+            _eventDeduplicationCache.Clear();
+            Interlocked.Exchange(ref _lastCacheCleanupTicks, 0);
+            Interlocked.Exchange(ref _lastDiagnosticsLogTicks, 0);
+            Interlocked.Exchange(ref _kookSendSuccessCount, 0);
+            Interlocked.Exchange(ref _kookSendCanceledCount, 0);
+            Interlocked.Exchange(ref _kookSendDroppedCount, 0);
+            Interlocked.Exchange(ref _pvpEventsReceivedCount, 0);
+            Interlocked.Exchange(ref _pvpEventsDisabledCount, 0);
+            Interlocked.Exchange(ref _pvpEventsInvalidPlayerCount, 0);
+            Interlocked.Exchange(ref _pvpEventsSelfDamageSkippedCount, 0);
+            Interlocked.Exchange(ref _pvpEventsLowDamageSkippedCount, 0);
+            Interlocked.Exchange(ref _pvpEventsQueuedCount, 0);
+            Interlocked.Exchange(ref _pvpEventsSentCount, 0);
+            Interlocked.Exchange(ref _pvpEventsFailedCount, 0);
+            Interlocked.Exchange(ref _pvpEventsBacklogDropCount, 0);
+        }
+
+        private static void MaybeLogDiagnostics(string reason)
+        {
+            if (!ShouldLogDebug)
+            {
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var nowTicks = now.Ticks;
+            var previousTicks = Interlocked.Read(ref _lastDiagnosticsLogTicks);
+            if (previousTicks != 0 && nowTicks - previousTicks < DiagnosticsLogIntervalMs * TimeSpan.TicksPerMillisecond)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref _lastDiagnosticsLogTicks, nowTicks, previousTicks) != previousTicks)
+            {
+                return;
+            }
+
+            Logger.Log(
+                $"[DEBUG] Events diagnostics ({reason}): pendingSends={Volatile.Read(ref _pendingKookSendCount)}, " +
+                $"sendSuccess={Volatile.Read(ref _kookSendSuccessCount)}, sendCanceled={Volatile.Read(ref _kookSendCanceledCount)}, " +
+                $"sendDropped={Volatile.Read(ref _kookSendDroppedCount)}, dedupeCache={_eventDeduplicationCache.Count}, " +
+                $"pvpReceived={Volatile.Read(ref _pvpEventsReceivedCount)}, pvpQueued={Volatile.Read(ref _pvpEventsQueuedCount)}, " +
+                $"pvpSent={Volatile.Read(ref _pvpEventsSentCount)}, pvpFailed={Volatile.Read(ref _pvpEventsFailedCount)}, " +
+                $"pvpBacklogDrop={Volatile.Read(ref _pvpEventsBacklogDropCount)}, pvpDisabled={Volatile.Read(ref _pvpEventsDisabledCount)}, " +
+                $"pvpInvalid={Volatile.Read(ref _pvpEventsInvalidPlayerCount)}, pvpSelf={Volatile.Read(ref _pvpEventsSelfDamageSkippedCount)}, " +
+                $"pvpLowDamage={Volatile.Read(ref _pvpEventsLowDamageSkippedCount)}");
+        }
     }
 }
