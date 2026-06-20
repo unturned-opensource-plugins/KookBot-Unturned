@@ -368,3 +368,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# Local Codex/codegraph cache and packaged release artifacts
+.DS_Store
+.codegraph/
+KookBot-Unturned-*.zip
