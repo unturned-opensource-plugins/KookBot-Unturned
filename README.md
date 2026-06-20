@@ -37,6 +37,12 @@
 - Kook机器人令牌
 - 服务器监控设置
 
+
+## 运维文档
+
+- [管理指令](docs/admin-commands.md)
+- [v1.2.0 上线与回滚手册](docs/rollouts/v1.2.0.md)
+
 ## 开发
 
 ### 构建项目
