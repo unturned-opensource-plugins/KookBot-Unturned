@@ -17,8 +17,7 @@ namespace Emqo.KookBot_Unturned
 {
     internal static class ChatModerationManager
     {
-        // Thread-safe concurrent dictionaries - no semaphore needed
-        private static readonly ConcurrentDictionary<CSteamID, MuteInfo> MuteMap = new();
+        private static readonly MuteRegistry Mutes = new();
         private static CancellationTokenSource _cleanupCancellationTokenSource;
         private static Task _cleanupTask;
         private static readonly object _lifecycleLock = new();
@@ -31,9 +30,7 @@ namespace Emqo.KookBot_Unturned
         private static ChatModerationConfig _config;
         private static IConfigurationProvider _configProvider;
 
-        // Message detectors
-        private static readonly List<IMessageDetector> _detectors = new();
-        private static readonly object _detectorsLock = new();
+        private static readonly MessageDetectorRegistry Detectors = new();
 
         private static bool ShouldLogDebug => _configProvider?.IsDebugEnabled ?? KookBot_UnturnedPlugin.Instance?.Configuration?.Instance?.Debug ?? false;
 
@@ -52,15 +49,13 @@ namespace Emqo.KookBot_Unturned
                 _config = configuration.Moderation;
 
                 StopCleanupLoopLocked();
-                ResetDetectorsLocked();
-
-                RegisterDefaultDetectors();
+                Detectors.ResetToDefaults(_config, ShouldLogDebug);
                 StartCleanupLoopLocked();
 
                 var generation = Interlocked.Increment(ref _initializeGeneration);
                 if (ShouldLogDebug)
                 {
-                    Logger.Log($"Chat moderation initialized (generation {generation}, detectors: {_detectors.Count})");
+                    Logger.Log($"Chat moderation initialized (generation {generation}, detectors: {Detectors.Names().Count})");
                 }
             }
         }
@@ -77,21 +72,7 @@ namespace Emqo.KookBot_Unturned
                 _config = config;
             }
 
-            // Update all detectors with new config
-            lock (_detectorsLock)
-            {
-                foreach (var detector in _detectors)
-                {
-                    try
-                    {
-                        detector.UpdateConfig(_config);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError($"Error updating detector {detector.Name}: {ex.Message}");
-                    }
-                }
-            }
+            Detectors.UpdateConfig(_config);
         }
 
         internal static void Shutdown()
@@ -101,9 +82,8 @@ namespace Emqo.KookBot_Unturned
                 lock (_lifecycleLock)
                 {
                     StopCleanupLoopLocked();
-                    ResetDetectorsLocked();
-
-                    MuteMap.Clear();
+                    Detectors.ShutdownAll();
+                    Mutes.Clear();
                     _config = null;
                     _configProvider = null;
 
@@ -119,10 +99,10 @@ namespace Emqo.KookBot_Unturned
             }
         }
 
-        internal static async Task<ChatModerationResult> EvaluateMessageAsync(UnturnedPlayer player, string message)
+        internal static Task<ChatModerationResult> EvaluateMessageAsync(UnturnedPlayer player, string message)
         {
-            return EvaluateMessageCore(player, message, async: true,
-                detect: (detector, p, m) => detector.DetectAsync(p, m));
+            return Task.FromResult(EvaluateMessageCore(player, message, async: true,
+                detect: (detector, p, m) => detector.DetectAsync(p, m)));
         }
 
         /// <summary>
@@ -162,13 +142,7 @@ namespace Emqo.KookBot_Unturned
             }
 
             // Run all detectors
-            List<IMessageDetector> detectorsSnapshot;
-            lock (_detectorsLock)
-            {
-                detectorsSnapshot = new List<IMessageDetector>(_detectors);
-            }
-
-            foreach (var detector in detectorsSnapshot)
+            foreach (var detector in Detectors.Snapshot())
             {
                 if (!detector.IsEnabled)
                 {
@@ -198,7 +172,7 @@ namespace Emqo.KookBot_Unturned
                             result.AppliedMute = appliedMute;
 
                             // Broadcast if enabled
-                            if (settings.BroadcastSpamMutes)
+                            if (settings.BroadcastAutoMutes || settings.BroadcastSpamMutes)
                             {
                                 BroadcastMuteToAll(player.DisplayName ?? player.CharacterName, appliedMute);
                             }
@@ -237,285 +211,63 @@ namespace Emqo.KookBot_Unturned
 
         private static MuteInfo MutePlayer(CSteamID steamId, string playerName, TimeSpan? duration, string reason, string mutedBy, bool isAuto)
         {
-            var now = DateTimeOffset.UtcNow;
-            var info = new MuteInfo
-            {
-                SteamId = steamId,
-                PlayerName = playerName,
-                Reason = string.IsNullOrWhiteSpace(reason) ? (isAuto ? "System auto-mute" : "Admin mute") : reason,
-                MutedBy = string.IsNullOrWhiteSpace(mutedBy) ? "Unknown" : mutedBy,
-                MutedAt = now,
-                IsAuto = isAuto
-            };
-
-            if (duration.HasValue && duration.Value > TimeSpan.Zero)
-            {
-                info.ExpiresAt = now.Add(duration.Value);
-            }
-
-            try
-            {
-                MuteMap[steamId] = info;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error muting player: {ex.Message}");
-            }
-
-            if (ShouldLogDebug)
-            {
-                Logger.Log($"Player {playerName} muted by {info.MutedBy} ({info.GetDurationDescription()}) Reason: {info.Reason}");
-            }
-            return info;
+            return Mutes.Mute(steamId, playerName, duration, reason, mutedBy, isAuto, ShouldLogDebug);
         }
 
         internal static bool TryUnmutePlayer(string playerNameOrId, out MuteInfo muteInfo)
         {
-            muteInfo = null;
-
-            try
-            {
-                var entry = MuteMap.FirstOrDefault(pair =>
-                    pair.Value.PlayerName.Equals(playerNameOrId, StringComparison.OrdinalIgnoreCase) ||
-                    pair.Key.ToString().Equals(playerNameOrId, StringComparison.OrdinalIgnoreCase));
-
-                if (entry.Value == null)
-                {
-                    return false;
-                }
-
-                muteInfo = entry.Value;
-                MuteMap.TryRemove(entry.Key, out _);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error unmuting player: {ex.Message}");
-                return false;
-            }
-            finally
-            {
-                if (muteInfo != null)
-                {
-                    Logger.Log($"Player {muteInfo.PlayerName} unmuted manually.");
-                }
-            }
+            return Mutes.TryUnmutePlayer(playerNameOrId, out muteInfo);
         }
 
         internal static bool UnmuteBySteamId(CSteamID steamId, out MuteInfo muteInfo)
         {
-            muteInfo = null;
-
-            try
-            {
-                if (!MuteMap.TryRemove(steamId, out muteInfo))
-                {
-                    return false;
-                }
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error unmuting player by SteamID: {ex.Message}");
-                return false;
-            }
-            finally
-            {
-                if (muteInfo != null)
-                {
-                    Logger.Log($"Player {muteInfo.PlayerName} unmuted (SteamID match).");
-                }
-            }
+            return Mutes.UnmuteBySteamId(steamId, out muteInfo);
         }
 
         internal static IReadOnlyCollection<MuteInfo> GetActiveMutes()
         {
-            try
-            {
-                // Clean up expired mutes
-                foreach (var pair in MuteMap)
-                {
-                    if (pair.Value.IsExpired)
-                    {
-                        MuteMap.TryRemove(pair.Key, out _);
-                    }
-                }
-
-                return MuteMap.Values.ToList();
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error getting active mutes: {ex.Message}");
-                return new List<MuteInfo>();
-            }
+            return Mutes.GetActiveMutes();
         }
 
         internal static bool IsMuted(CSteamID steamId, out MuteInfo muteInfo)
         {
-            muteInfo = null;
-            try
-            {
-                if (!MuteMap.TryGetValue(steamId, out var info))
-                {
-                    return false;
-                }
-
-                if (info.IsExpired)
-                {
-                    MuteMap.TryRemove(steamId, out _);
-                    return false;
-                }
-
-                muteInfo = info;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error checking mute status: {ex.Message}");
-                return false;
-            }
+            return Mutes.IsMuted(steamId, out muteInfo);
         }
 
         /// <summary>
         /// Fast synchronous mute check for main thread use.
-        /// Thread-safe with ConcurrentDictionary.
+        /// Thread-safe with the mute registry.
         /// </summary>
         internal static bool IsMutedSync(CSteamID steamId)
         {
-            try
-            {
-                if (!MuteMap.TryGetValue(steamId, out var info))
-                {
-                    return false;
-                }
-                return !info.IsExpired;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error in IsMutedSync: {ex.Message}");
-                return false;
-            }
+            return Mutes.IsMutedSync(steamId);
         }
 
         /// <summary>
         /// Clean up player data when they disconnect to prevent memory leaks.
-        /// Note: MuteMap is NOT cleaned - mutes should persist even after disconnect.
+        /// Note: mute records are NOT cleaned - mutes should persist even after disconnect.
         /// </summary>
         internal static void CleanupPlayerData(CSteamID steamId)
         {
-            // Clean up detector data
-            lock (_detectorsLock)
-            {
-                foreach (var detector in _detectors)
-                {
-                    try
-                    {
-                        detector.CleanupPlayerData(steamId);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError($"Error cleaning up detector {detector.Name} data: {ex.Message}");
-                    }
-                }
-            }
-            // MuteMap intentionally persists across disconnects
+            Detectors.CleanupPlayerData(steamId);
+            // Mute records intentionally persist across disconnects.
         }
 
         #region Detector Management
 
-        /// <summary>
-        /// Register default detectors (RateLimitDetector, ForbiddenWordDetector).
-        /// </summary>
-        private static void RegisterDefaultDetectors()
-        {
-            RegisterDetector(new RateLimitDetector());
-            RegisterDetector(new ForbiddenWordDetector());
-
-            if (ShouldLogDebug)
-            {
-                Logger.Log($"Registered {_detectors.Count} default message detectors");
-            }
-        }
-
-        /// <summary>
-        /// Register a message detector.
-        /// </summary>
-        /// <param name="detector">The detector to register.</param>
         internal static void RegisterDetector(IMessageDetector detector)
         {
-            if (detector == null)
-            {
-                return;
-            }
-
-            lock (_detectorsLock)
-            {
-                // Check if detector with same name already exists
-                if (_detectors.Any(d => d.Name == detector.Name))
-                {
-                    Logger.LogWarning($"Detector {detector.Name} already registered, skipping");
-                    return;
-                }
-
-                detector.Initialize(_config ?? ChatModerationConfig.CreateDefault());
-                _detectors.Add(detector);
-
-                if (ShouldLogDebug)
-                {
-                    Logger.Log($"Registered detector: {detector.Name}");
-                }
-            }
+            Detectors.Register(detector, _config ?? ChatModerationConfig.CreateDefault(), ShouldLogDebug);
         }
 
-        /// <summary>
-        /// Unregister a message detector by name.
-        /// </summary>
-        /// <param name="name">The name of the detector to unregister.</param>
-        /// <returns>True if the detector was found and removed.</returns>
         internal static bool UnregisterDetector(string name)
         {
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return false;
-            }
-
-            lock (_detectorsLock)
-            {
-                var detector = _detectors.FirstOrDefault(d => d.Name == name);
-                if (detector == null)
-                {
-                    return false;
-                }
-
-                try
-                {
-                    detector.Shutdown();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"Error shutting down detector {name}: {ex.Message}");
-                }
-
-                _detectors.Remove(detector);
-
-                if (ShouldLogDebug)
-                {
-                    Logger.Log($"Unregistered detector: {name}");
-                }
-
-                return true;
-            }
+            return Detectors.Unregister(name, ShouldLogDebug);
         }
 
-        /// <summary>
-        /// Get a list of registered detector names.
-        /// </summary>
         internal static IReadOnlyList<string> GetRegisteredDetectorNames()
         {
-            lock (_detectorsLock)
-            {
-                return _detectors.Select(d => d.Name).ToList();
-            }
+            return Detectors.Names();
         }
 
         #endregion
@@ -539,14 +291,7 @@ namespace Emqo.KookBot_Unturned
 
         private static Task CleanupExpiredMutesAsync()
         {
-            foreach (var pair in MuteMap)
-            {
-                if (pair.Value.IsExpired)
-                {
-                    MuteMap.TryRemove(pair.Key, out _);
-                }
-            }
-
+            Mutes.CleanupExpired();
             return Task.CompletedTask;
         }
 
@@ -631,26 +376,6 @@ namespace Emqo.KookBot_Unturned
             }
 
             cancellationTokenSource?.Dispose();
-        }
-
-        private static void ResetDetectorsLocked()
-        {
-            lock (_detectorsLock)
-            {
-                foreach (var detector in _detectors)
-                {
-                    try
-                    {
-                        detector.Shutdown();
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError($"Error shutting down detector {detector.Name}: {ex.Message}");
-                    }
-                }
-
-                _detectors.Clear();
-            }
         }
 
         private static string BuildMuteMessage(MuteInfo muteInfo)

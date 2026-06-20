@@ -4,12 +4,11 @@
 
 ## 功能特性
 
-- **聊天调制**：强大的聊天内容审核系统
+- **聊天审核**：轻量聊天内容审核系统
   - 禁言管理（临时/永久）
   - 违禁词过滤
-  - 脏话检测和屏蔽
-  - 刷屏检测（消息频率、重复字符、相似消息）
-  - 递增惩罚系统
+  - 发言频率限制
+  - 违禁词自动禁言（可选）
 
 - **Kook集成**：与Kook平台无缝集成
   - WebSocket连接管理
@@ -18,7 +17,7 @@
 
 - **配置管理**：灵活的配置系统
   - 热重载配置
-  - 自动更新检查
+  - 运行时事件/指令开关
 
 ## 系统要求
 
@@ -48,11 +47,11 @@ dotnet build
 
 ### 项目结构
 
-- `ChatModerationManager.cs` - 聊天审核核心逻辑
-- `KookApi/` - Kook API集成
+- `ChatModerationManager.cs` / `MuteRegistry.cs` / `MessageDetectorRegistry.cs` - 聊天审核、禁言和检测器生命周期
+- `Commands*.cs` / `KookAdminCommandHandler.cs` - KOOK 指令路由、管理指令和运维入口
+- `Events*.cs` / `EventDeduplicationStore.cs` / `PvpEventRuntime.cs` / `KookSendQueue.cs` - 游戏事件转发、去重、PvP 降噪和 KOOK 发送队列
+- `KookApi/` - KOOK HTTP API、WebSocket Gateway 和卡片消息
 - `Monitoring/` - 服务器监控
-- `Commands.cs` - 插件命令
-- `Events.cs` - 事件处理
 
 ## 许可证
 

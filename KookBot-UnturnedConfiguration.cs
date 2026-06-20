@@ -35,6 +35,7 @@ namespace Emqo.KookBot_Unturned
             "unmute",
             "mutes"
         };
+        private static readonly string[] ConsoleCommandAliases = { "cmd", "console", "exec" };
 
         public string ServerName { get; set; }
         public string BotToken { get; set; }
@@ -51,17 +52,20 @@ namespace Emqo.KookBot_Unturned
         public bool Debug { get; set; }
 
         public ChatModerationConfig Moderation { get; set; }
+        private readonly object _settingsLock = new object();
+        private Dictionary<string, bool> _gameToKook;
+        private Dictionary<string, bool> _commands;
 
         [XmlIgnore]
-        public Dictionary<string, bool> GameToKook { get; private set; }
+        public IReadOnlyDictionary<string, bool> GameToKook => GetGameToKookSnapshot();
 
         [XmlIgnore]
-        public Dictionary<string, bool> Commands { get; private set; }
+        public IReadOnlyDictionary<string, bool> Commands => GetCommandSnapshot();
 
         public KookBot_UnturnedConfiguration()
         {
-            GameToKook = new Dictionary<string, bool>();
-            Commands = new Dictionary<string, bool>();
+            _gameToKook = new Dictionary<string, bool>();
+            _commands = new Dictionary<string, bool>();
             Moderation = ChatModerationConfig.CreateDefault();
         }
 
@@ -77,22 +81,28 @@ namespace Emqo.KookBot_Unturned
             Debug = false;
             ExposeReviveCoordinates = false;
 
-            GameToKook = NormalizeSettings(null, DefaultGameEventKeys);
-            Commands = NormalizeSettings(null, DefaultCommandKeys);
+            lock (_settingsLock)
+            {
+                _gameToKook = NormalizeSettings(null, DefaultGameEventKeys);
+                _commands = NormalizeCommandSettings(null);
 
-            GameToKookSettings = ToSettingList(GameToKook);
-            CommandSettings = ToSettingList(Commands);
+                GameToKookSettings = ToSettingList(_gameToKook);
+                CommandSettings = ToSettingList(_commands);
+            }
 
             Moderation = ChatModerationConfig.CreateDefault();
         }
 
         public void ConvertListsToDictionaries()
         {
-            GameToKook = NormalizeSettings(GameToKookSettings, DefaultGameEventKeys);
-            Commands = NormalizeSettings(CommandSettings, DefaultCommandKeys);
+            lock (_settingsLock)
+            {
+                _gameToKook = NormalizeSettings(GameToKookSettings, DefaultGameEventKeys);
+                _commands = NormalizeCommandSettings(CommandSettings);
 
-            GameToKookSettings = ToSettingList(GameToKook);
-            CommandSettings = ToSettingList(Commands);
+                GameToKookSettings = ToSettingList(_gameToKook);
+                CommandSettings = ToSettingList(_commands);
+            }
 
             Moderation ??= ChatModerationConfig.CreateDefault();
             Moderation.ApplyDefaultsIfNeeded();
@@ -100,11 +110,14 @@ namespace Emqo.KookBot_Unturned
 
         public void ConvertDictionariesToLists()
         {
-            GameToKook ??= NormalizeSettings(GameToKookSettings, DefaultGameEventKeys);
-            Commands ??= NormalizeSettings(CommandSettings, DefaultCommandKeys);
+            lock (_settingsLock)
+            {
+                _gameToKook ??= NormalizeSettings(GameToKookSettings, DefaultGameEventKeys);
+                _commands ??= NormalizeCommandSettings(CommandSettings);
 
-            GameToKookSettings = ToSettingList(GameToKook);
-            CommandSettings = ToSettingList(Commands);
+                GameToKookSettings = ToSettingList(_gameToKook);
+                CommandSettings = ToSettingList(_commands);
+            }
 
             Moderation ??= ChatModerationConfig.CreateDefault();
             Moderation.ApplyDefaultsIfNeeded();
@@ -117,12 +130,109 @@ namespace Emqo.KookBot_Unturned
 
         public bool IsGameToKookEnabled(string eventName)
         {
-            return GameToKook != null && GameToKook.ContainsKey(eventName) && GameToKook[eventName];
+            lock (_settingsLock)
+            {
+                return _gameToKook != null && _gameToKook.TryGetValue(eventName, out var enabled) && enabled;
+            }
         }
 
         public bool IsCommandEnabled(string commandName)
         {
-            return Commands != null && Commands.ContainsKey(commandName) && Commands[commandName];
+            lock (_settingsLock)
+            {
+                if (_commands == null)
+                {
+                    return false;
+                }
+
+                if (IsConsoleCommandAlias(commandName))
+                {
+                    return ConsoleCommandAliases.All(alias => _commands.TryGetValue(alias, out var enabled) && enabled);
+                }
+
+                return _commands.TryGetValue(commandName, out var commandEnabled) && commandEnabled;
+            }
+        }
+
+        public Dictionary<string, bool> GetGameToKookSnapshot()
+        {
+            lock (_settingsLock)
+            {
+                return new Dictionary<string, bool>(_gameToKook ?? new Dictionary<string, bool>(), StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        public Dictionary<string, bool> GetCommandSnapshot()
+        {
+            lock (_settingsLock)
+            {
+                return new Dictionary<string, bool>(_commands ?? new Dictionary<string, bool>(), StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        public bool TrySetGameToKookRuntime(string eventName, bool enabled)
+        {
+            lock (_settingsLock)
+            {
+                if (_gameToKook == null || !_gameToKook.ContainsKey(eventName))
+                {
+                    return false;
+                }
+
+                var updated = new Dictionary<string, bool>(_gameToKook, StringComparer.OrdinalIgnoreCase)
+                {
+                    [eventName] = enabled
+                };
+                _gameToKook = updated;
+                GameToKookSettings = ToSettingList(updated);
+                return true;
+            }
+        }
+
+        public bool TrySetCommandRuntime(string commandName, bool enabled)
+        {
+            lock (_settingsLock)
+            {
+                if (_commands == null || !_commands.ContainsKey(commandName))
+                {
+                    return false;
+                }
+
+                var updated = new Dictionary<string, bool>(_commands, StringComparer.OrdinalIgnoreCase)
+                {
+                    [commandName] = enabled
+                };
+                _commands = NormalizeCommandAliases(updated);
+                CommandSettings = ToSettingList(_commands);
+                return true;
+            }
+        }
+
+        private static bool IsConsoleCommandAlias(string commandName)
+        {
+            return ConsoleCommandAliases.Contains(commandName, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static Dictionary<string, bool> NormalizeCommandSettings(List<SettingItem> source)
+        {
+            return NormalizeCommandAliases(NormalizeSettings(source, DefaultCommandKeys));
+        }
+
+        private static Dictionary<string, bool> NormalizeCommandAliases(Dictionary<string, bool> source)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            // Safety first: if any console alias is false, the whole console bridge is false.
+            var consoleEnabled = ConsoleCommandAliases.All(alias => source.TryGetValue(alias, out var enabled) && enabled);
+            foreach (var alias in ConsoleCommandAliases)
+            {
+                source[alias] = consoleEnabled;
+            }
+
+            return source;
         }
 
         private static Dictionary<string, bool> NormalizeSettings(List<SettingItem> source, IEnumerable<string> defaults)
@@ -178,11 +288,14 @@ namespace Emqo.KookBot_Unturned
                 ? new List<string>(source.Admin)
                 : new List<string>();
 
-            GameToKook = new Dictionary<string, bool>(source.GameToKook ?? new Dictionary<string, bool>(), StringComparer.OrdinalIgnoreCase);
-            Commands = new Dictionary<string, bool>(source.Commands ?? new Dictionary<string, bool>(), StringComparer.OrdinalIgnoreCase);
+            lock (_settingsLock)
+            {
+                _gameToKook = new Dictionary<string, bool>(source.GetGameToKookSnapshot(), StringComparer.OrdinalIgnoreCase);
+                _commands = NormalizeCommandAliases(new Dictionary<string, bool>(source.GetCommandSnapshot(), StringComparer.OrdinalIgnoreCase));
 
-            GameToKookSettings = ToSettingList(GameToKook);
-            CommandSettings = ToSettingList(Commands);
+                GameToKookSettings = ToSettingList(_gameToKook);
+                CommandSettings = ToSettingList(_commands);
+            }
 
             if (source.Moderation == null)
             {
@@ -221,6 +334,7 @@ namespace Emqo.KookBot_Unturned
         public bool EnableModeration { get; set; }
         public int AutoMuteDurationSeconds { get; set; }
         public int DefaultManualMuteMinutes { get; set; }
+        public bool BroadcastAutoMutes { get; set; }
         public bool BroadcastSpamMutes { get; set; }
 
         // Rate limit detection settings
@@ -243,6 +357,7 @@ namespace Emqo.KookBot_Unturned
                 EnableModeration = true,
                 AutoMuteDurationSeconds = 120,
                 DefaultManualMuteMinutes = 10,
+                BroadcastAutoMutes = true,
                 BroadcastSpamMutes = true,
 
                 // Rate limit defaults
@@ -277,6 +392,11 @@ namespace Emqo.KookBot_Unturned
             if (DefaultManualMuteMinutes <= 0)
             {
                 DefaultManualMuteMinutes = defaults.DefaultManualMuteMinutes;
+            }
+
+            if (!BroadcastAutoMutes && BroadcastSpamMutes)
+            {
+                BroadcastAutoMutes = true;
             }
 
             // Rate limit defaults
@@ -316,6 +436,7 @@ namespace Emqo.KookBot_Unturned
             EnableModeration = other.EnableModeration;
             AutoMuteDurationSeconds = other.AutoMuteDurationSeconds;
             DefaultManualMuteMinutes = other.DefaultManualMuteMinutes;
+            BroadcastAutoMutes = other.BroadcastAutoMutes || other.BroadcastSpamMutes;
             BroadcastSpamMutes = other.BroadcastSpamMutes;
 
             EnableRateLimitDetection = other.EnableRateLimitDetection;

@@ -34,7 +34,7 @@ namespace Emqo.KookBot_Unturned.Monitoring
         {
             try
             {
-                var players = Provider.clients ?? new List<SteamPlayer>();
+                var players = SnapshotClients();
                 var (avgPing, maxPing) = TryComputePing(players);
 
                 return new ServerStatusSnapshot
@@ -63,6 +63,19 @@ namespace Emqo.KookBot_Unturned.Monitoring
                     EstimatedTps = EstimateTps(),
                     Uptime = KookBot_UnturnedPlugin.GetUptime()
                 };
+            }
+        }
+
+        private static List<SteamPlayer> SnapshotClients()
+        {
+            try
+            {
+                return Provider.clients?.Where(player => player != null).ToList() ?? new List<SteamPlayer>();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Failed to snapshot player list: {ex.Message}");
+                return new List<SteamPlayer>();
             }
         }
 
@@ -218,4 +231,3 @@ namespace Emqo.KookBot_Unturned.Monitoring
         }
     }
 }
-

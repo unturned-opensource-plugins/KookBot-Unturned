@@ -140,7 +140,7 @@ namespace Emqo.KookBot_Unturned
             }
         }
 
-        private static async Task ReloadConfigurationAsync()
+        private static Task ReloadConfigurationAsync()
         {
             try
             {
@@ -148,7 +148,7 @@ namespace Emqo.KookBot_Unturned
                 if (updated == null)
                 {
                     Logger.LogWarning("⚠️ Hot reload skipped, failed to parse configuration.");
-                    return;
+                    return Task.CompletedTask;
                 }
 
                 updated.ConvertListsToDictionaries();
@@ -157,7 +157,7 @@ namespace Emqo.KookBot_Unturned
                 var current = plugin?.Configuration?.Instance;
                 if (plugin == null || current == null)
                 {
-                    return;
+                    return Task.CompletedTask;
                 }
 
                 var botTokenChanged = !string.Equals(current.BotToken, updated.BotToken, StringComparison.Ordinal);
@@ -191,6 +191,8 @@ namespace Emqo.KookBot_Unturned
             {
                 Logger.LogError($"❌ Failed to hot reload configuration: {ex.Message}");
             }
+
+            return Task.CompletedTask;
         }
 
         private static KookBot_UnturnedConfiguration LoadConfiguration(string path)
