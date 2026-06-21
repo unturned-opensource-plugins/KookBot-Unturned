@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Concurrent;
-using System.Threading.Tasks;
 using Rocket.Unturned.Player;
 using Steamworks;
 
@@ -41,11 +40,6 @@ namespace Emqo.KookBot_Unturned.Detectors
             _warningMessage = !string.IsNullOrWhiteSpace(config.RateLimitWarningMessage)
                 ? config.RateLimitWarningMessage
                 : "说话太快啦，请稍后再试。";
-        }
-
-        public Task<DetectionResult> DetectAsync(UnturnedPlayer player, string message)
-        {
-            return Task.FromResult(DetectSync(player, message));
         }
 
         public DetectionResult DetectSync(UnturnedPlayer player, string message)

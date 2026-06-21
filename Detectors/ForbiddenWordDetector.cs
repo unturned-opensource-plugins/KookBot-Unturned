@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using Rocket.Unturned.Player;
 using Steamworks;
 
@@ -58,11 +57,6 @@ namespace Emqo.KookBot_Unturned.Detectors
                 }
             }
             _forbiddenWordsLower = newSet;
-        }
-
-        public Task<DetectionResult> DetectAsync(UnturnedPlayer player, string message)
-        {
-            return Task.FromResult(DetectSync(player, message));
         }
 
         public DetectionResult DetectSync(UnturnedPlayer player, string message)

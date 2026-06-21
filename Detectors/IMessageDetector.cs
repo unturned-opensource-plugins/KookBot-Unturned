@@ -1,4 +1,3 @@
-using System.Threading.Tasks;
 using Rocket.Unturned.Player;
 using Steamworks;
 
@@ -21,15 +20,7 @@ namespace Emqo.KookBot_Unturned.Detectors
         bool IsEnabled { get; }
 
         /// <summary>
-        /// Evaluate a message for violations.
-        /// </summary>
-        /// <param name="player">The player who sent the message.</param>
-        /// <param name="message">The message content.</param>
-        /// <returns>Detection result indicating if a violation was found.</returns>
-        Task<DetectionResult> DetectAsync(UnturnedPlayer player, string message);
-
-        /// <summary>
-        /// Synchronously evaluate a message for violations (for blocking chat events).
+        /// Synchronously evaluate a message for violations.
         /// </summary>
         /// <param name="player">The player who sent the message.</param>
         /// <param name="message">The message content.</param>

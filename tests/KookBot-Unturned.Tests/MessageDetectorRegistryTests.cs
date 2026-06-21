@@ -75,7 +75,6 @@ public class MessageDetectorRegistryTests
         public int CleanupCount { get; private set; }
         public CSteamID LastCleanupId { get; private set; }
 
-        public Task<DetectionResult> DetectAsync(UnturnedPlayer player, string message) => Task.FromResult(DetectionResult.Allowed());
         public DetectionResult DetectSync(UnturnedPlayer player, string message) => DetectionResult.Allowed();
 
         public void Initialize(ChatModerationConfig config)

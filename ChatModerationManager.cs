@@ -98,24 +98,15 @@ namespace Emqo.KookBot_Unturned
             }
         }
 
-        internal static Task<ChatModerationResult> EvaluateMessageAsync(UnturnedPlayer player, string message)
-        {
-            return Task.FromResult(EvaluateMessageCore(player, message, async: true,
-                detect: (detector, p, m) => detector.DetectAsync(p, m)));
-        }
-
         /// <summary>
         /// 同步检测消息是否违规（用于在聊天事件中同步拦截）
         /// </summary>
         internal static ChatModerationResult EvaluateMessageSync(UnturnedPlayer player, string message)
         {
-            return EvaluateMessageCore(player, message, async: false,
-                detect: (detector, p, m) => Task.FromResult(detector.DetectSync(p, m)));
+            return EvaluateMessageCore(player, message);
         }
 
-        private static ChatModerationResult EvaluateMessageCore(
-            UnturnedPlayer player, string message, bool async,
-            Func<IMessageDetector, UnturnedPlayer, string, Task<DetectionResult>> detect)
+        private static ChatModerationResult EvaluateMessageCore(UnturnedPlayer player, string message)
         {
             var result = new ChatModerationResult { IsAllowed = true };
 
@@ -150,8 +141,7 @@ namespace Emqo.KookBot_Unturned
 
                 try
                 {
-                    var detectionTask = detect(detector, player, message);
-                    var detectionResult = detectionTask.GetAwaiter().GetResult();
+                    var detectionResult = detector.DetectSync(player, message);
                     if (detectionResult.IsViolation)
                     {
                         result.IsAllowed = false;
