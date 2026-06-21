@@ -40,6 +40,32 @@ public class RuntimeSourcePolicyTests
         }
     }
 
+    [Theory]
+    [InlineData("KookBot-UnturnedConfiguration.cs", "class SettingItem")]
+    [InlineData("KookBot-UnturnedConfiguration.cs", "class ChatModerationConfig")]
+    [InlineData("ChatModerationManager.cs", "class ChatModerationResult")]
+    [InlineData("ChatModerationManager.cs", "class MuteInfo")]
+    public void Former_monoliths_do_not_keep_extracted_object_types(string relativePath, string tombstoneTypeDeclaration)
+    {
+        var contents = File.ReadAllText(FindRepoFile(relativePath));
+
+        Assert.DoesNotContain(tombstoneTypeDeclaration, contents, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("SettingItem.cs")]
+    [InlineData("ChatModerationConfig.cs")]
+    [InlineData("ChatModerationResult.cs")]
+    [InlineData("MuteInfo.cs")]
+    [InlineData("Commands.Console.cs")]
+    [InlineData("Commands.Status.cs")]
+    [InlineData("Events.Chat.cs")]
+    [InlineData("KookApi/WebSocket.Transport.cs")]
+    public void Object_level_split_has_standalone_source_files(string relativePath)
+    {
+        Assert.True(File.Exists(FindRepoFile(relativePath)), $"{relativePath} should remain a standalone source file.");
+    }
+
     private static string FindRepoFile(string relativePath)
     {
         return Path.Combine(FindRepoRoot(), relativePath);

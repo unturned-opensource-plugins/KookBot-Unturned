@@ -18,6 +18,10 @@
 
   <ItemGroup>
     <Compile Include="..\..\KookBot-UnturnedConfiguration.cs" Link="Production\KookBot-UnturnedConfiguration.cs" />
+    <Compile Include="..\..\SettingItem.cs" Link="Production\SettingItem.cs" />
+    <Compile Include="..\..\ChatModerationConfig.cs" Link="Production\ChatModerationConfig.cs" />
+    <Compile Include="..\..\MuteInfo.cs" Link="Production\MuteInfo.cs" />
+    <Compile Include="..\..\ChatModerationResult.cs" Link="Production\ChatModerationResult.cs" />
     <Compile Include="..\..\PvpEventRuntime.cs" Link="Production\PvpEventRuntime.cs" />
     <Compile Include="..\..\KookSendQueue.cs" Link="Production\KookSendQueue.cs" />
     <Compile Include="..\..\LifecycleEventPolicy.cs" Link="Production\LifecycleEventPolicy.cs" />
