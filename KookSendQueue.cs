@@ -41,6 +41,7 @@ namespace Emqo.KookBot_Unturned
             {
                 if (cancellationTokenSource == null || cancellationTokenSource.IsCancellationRequested)
                 {
+                    Interlocked.Increment(ref _canceledCount);
                     if (isPvpContext)
                     {
                         PvpEventRuntime.Canceled();
@@ -54,6 +55,7 @@ namespace Emqo.KookBot_Unturned
 
                 if (cancellationTokenSource.IsCancellationRequested)
                 {
+                    Interlocked.Increment(ref _canceledCount);
                     if (isPvpContext)
                     {
                         PvpEventRuntime.Canceled();

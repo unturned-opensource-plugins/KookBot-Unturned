@@ -5,6 +5,10 @@ VisualStudioVersion = 17.12.35728.132 d17.12
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KookBot-Unturned", "KookBot-Unturned.csproj", "{536CCCBC-222F-4893-A77C-A27126C894FF}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{79130D18-E7E9-448A-89F8-18FD546354F2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KookBot-Unturned.Tests", "tests\KookBot-Unturned.Tests\KookBot-Unturned.Tests.csproj", "{A40D169E-6150-464F-AD77-ED01ACF2BCE9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,8 +19,15 @@ Global
 		{536CCCBC-222F-4893-A77C-A27126C894FF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{536CCCBC-222F-4893-A77C-A27126C894FF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{536CCCBC-222F-4893-A77C-A27126C894FF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A40D169E-6150-464F-AD77-ED01ACF2BCE9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A40D169E-6150-464F-AD77-ED01ACF2BCE9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A40D169E-6150-464F-AD77-ED01ACF2BCE9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A40D169E-6150-464F-AD77-ED01ACF2BCE9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A40D169E-6150-464F-AD77-ED01ACF2BCE9} = {79130D18-E7E9-448A-89F8-18FD546354F2}
 	EndGlobalSection
 EndGlobal

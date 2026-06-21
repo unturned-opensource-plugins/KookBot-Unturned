@@ -48,7 +48,13 @@
 ### 构建项目
 
 ```bash
-dotnet build
+dotnet build KookBot-Unturned.sln -c Release
+```
+
+### 运行测试
+
+```bash
+dotnet test KookBot-Unturned.sln -c Release
 ```
 
 ### 项目结构
