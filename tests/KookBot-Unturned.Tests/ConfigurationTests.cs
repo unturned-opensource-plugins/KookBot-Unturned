@@ -22,6 +22,12 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void ChatModerationConfig_does_not_expose_removed_auto_mute_duration_tombstone()
+    {
+        Assert.Null(typeof(ChatModerationConfig).GetProperty("AutoMuteDurationSeconds"));
+    }
+
+    [Fact]
     public void ConvertListsToDictionaries_normalizes_console_aliases_as_one_safety_group()
     {
         var config = new KookBot_UnturnedConfiguration

@@ -332,7 +332,6 @@ namespace Emqo.KookBot_Unturned
     {
         // Mute system settings
         public bool EnableModeration { get; set; }
-        public int AutoMuteDurationSeconds { get; set; }
         public int DefaultManualMuteMinutes { get; set; }
         public bool BroadcastAutoMutes { get; set; }
         public bool BroadcastSpamMutes { get; set; }
@@ -355,7 +354,6 @@ namespace Emqo.KookBot_Unturned
             {
                 // Mute system defaults
                 EnableModeration = true,
-                AutoMuteDurationSeconds = 120,
                 DefaultManualMuteMinutes = 10,
                 BroadcastAutoMutes = true,
                 BroadcastSpamMutes = true,
@@ -382,11 +380,6 @@ namespace Emqo.KookBot_Unturned
             {
                 CopyFrom(defaults);
                 return;
-            }
-
-            if (AutoMuteDurationSeconds <= 0)
-            {
-                AutoMuteDurationSeconds = defaults.AutoMuteDurationSeconds;
             }
 
             if (DefaultManualMuteMinutes <= 0)
@@ -427,14 +420,12 @@ namespace Emqo.KookBot_Unturned
         private bool IsUninitialized()
         {
             return !EnableModeration &&
-                   AutoMuteDurationSeconds == 0 &&
                    DefaultManualMuteMinutes == 0;
         }
 
         private void CopyFrom(ChatModerationConfig other)
         {
             EnableModeration = other.EnableModeration;
-            AutoMuteDurationSeconds = other.AutoMuteDurationSeconds;
             DefaultManualMuteMinutes = other.DefaultManualMuteMinutes;
             BroadcastAutoMutes = other.BroadcastAutoMutes || other.BroadcastSpamMutes;
             BroadcastSpamMutes = other.BroadcastSpamMutes;

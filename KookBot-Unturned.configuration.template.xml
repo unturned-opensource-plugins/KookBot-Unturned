@@ -83,9 +83,6 @@
     <!-- 总开关：开启后才会应用各类限制/过滤 -->
     <EnableModeration>true</EnableModeration>
 
-    <!-- 触发自动禁言时的默认时长（单位：秒），0 表示不自动禁言 -->
-    <AutoMuteDurationSeconds>120</AutoMuteDurationSeconds>
-
     <!-- 手动禁言未指定时长时的默认分钟数 -->
     <DefaultManualMuteMinutes>10</DefaultManualMuteMinutes>
 
