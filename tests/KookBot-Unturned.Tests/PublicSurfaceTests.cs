@@ -14,6 +14,16 @@ public class PublicSurfaceTests
         Assert.DoesNotContain("docs/", contents, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Configuration_template_keeps_player_damaged_enabled_with_high_frequency_warning()
+    {
+        var contents = File.ReadAllText(FindRepoFile("KookBot-Unturned.configuration.template.xml"));
+
+        Assert.Contains("<SettingItem><Key>PlayerDamaged</Key><Value>true</Value></SettingItem>", contents);
+        Assert.Contains("高频", contents);
+        Assert.Contains("生产", contents);
+    }
+
     private static string FindRepoFile(string relativePath)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

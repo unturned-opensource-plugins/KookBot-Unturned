@@ -22,6 +22,7 @@
     <Compile Include="..\..\KookSendQueue.cs" Link="Production\KookSendQueue.cs" />
     <Compile Include="..\..\LifecycleEventPolicy.cs" Link="Production\LifecycleEventPolicy.cs" />
     <Compile Include="..\..\KookAdminCommandHandler.cs" Link="Production\KookAdminCommandHandler.cs" />
+    <Compile Include="..\..\CommandHelpPolicy.cs" Link="Production\CommandHelpPolicy.cs" />
     <Compile Include="..\..\KookApi\KookCardFactory.cs" Link="Production\KookCardFactory.cs" />
     <Compile Include="..\..\Utilities\StringUtils.cs" Link="Production\StringUtils.cs" />
     <Compile Include="..\..\ConfigurationHotReloadService.cs" Link="Production\ConfigurationHotReloadService.cs" />

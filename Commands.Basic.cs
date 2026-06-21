@@ -88,47 +88,9 @@ namespace Emqo.KookBot_Unturned
 
         private static async Task HandleHelpCommand(string id, string channelId, bool isAdmin)
         {
-            var helpText = new StringBuilder();
-            helpText.Append("**🔹 普通指令：**\n");
+            var helpText = CommandHelpPolicy.BuildHelpText(Config, isAdmin);
 
-            // 只显示已启用的普通指令
-            if (Config.IsCommandEnabled("help"))
-                helpText.Append("`/help` - 显示此帮助信息\n");
-            if (Config.IsCommandEnabled("status"))
-                helpText.Append("`/status` - 查看 TPS/在线/延迟/排队\n");
-            if (Config.IsCommandEnabled("list"))
-                helpText.Append("`/list` - 查看在线玩家列表\n");
-
-            helpText.Append("\n");
-
-            if (isAdmin)
-            {
-                helpText.Append("**🔸 管理员指令：**\n");
-
-                // 只显示已启用的管理员指令
-                if (Config.IsCommandEnabled("say"))
-                    helpText.Append("`/say <内容>` - 服务器广播消息\n");
-                if (Config.IsCommandEnabled("cmd") || Config.IsCommandEnabled("console") || Config.IsCommandEnabled("exec"))
-                    helpText.Append("`/cmd <指令>` - 执行控制台指令\n");
-
-                helpText.Append("\n**🔐 禁言管理：**\n");
-                helpText.Append("`/mute <玩家> [分钟] [原因]` - 禁言玩家\n");
-                helpText.Append("`/unmute <玩家>` - 解除禁言\n");
-                helpText.Append("`/mutes` - 查看禁言列表\n");
-
-                helpText.Append("\n**🛟 运维入口：**\n");
-                helpText.Append("`/event list` - 查看事件同步开关\n");
-                helpText.Append("`/event set <事件名> <true|false>` - 临时调整事件同步\n");
-                helpText.Append("`/command list` - 查看指令开关\n");
-                helpText.Append("`/command set <指令名> <true|false>` - 临时调整指令开关\n");
-                helpText.Append("`/diag` - 查看安全诊断信息\n");
-            }
-            else
-            {
-                helpText.Append("*你没有管理员权限，无法查看管理员指令*");
-            }
-
-            var helpCard = KookCardFactory.BuildMarkdownCard("📚", "可用指令列表", helpText.ToString(), DateTimeOffset.Now, "info");
+            var helpCard = KookCardFactory.BuildMarkdownCard("📚", "可用指令列表", helpText, DateTimeOffset.Now, "info");
             await _message.CreateMessageAsync(10, channelId, helpCard);
             if (ShouldLogDebug())
             {

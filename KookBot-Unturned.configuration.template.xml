@@ -41,7 +41,7 @@
     <SettingItem><Key>PlayerRevive</Key><Value>true</Value></SettingItem>
     <!-- 游戏聊天消息（将使用卡片格式转发） -->
     <SettingItem><Key>ChatMessage</Key><Value>true</Value></SettingItem>
-    <!-- PvP 伤害事件（攻击/受击提示） -->
+    <!-- PvP 伤害事件（攻击/受击提示）。这是高频事件；生产服如出现刷屏或队列压力，可用 /event PlayerDamaged off 临时关闭。 -->
     <SettingItem><Key>PlayerDamaged</Key><Value>true</Value></SettingItem>
     <!-- 服务器启动 -->
     <SettingItem><Key>ServerStart</Key><Value>true</Value></SettingItem>
