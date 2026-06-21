@@ -26,17 +26,13 @@ namespace Emqo.KookBot_Unturned.KookApi
         // 使用Interlocked原子操作初始化_lastPongReceivedTicks
         Interlocked.Exchange(ref _lastPongReceivedTicks, DateTime.UtcNow.Ticks);
 
-        int baseIntervalMs = BaseHeartbeatIntervalSeconds * 1000; // 30秒转换为毫秒
-                                                                  // Random.Next(minValue, maxValue) 是左闭右开区间，所以 maxValue 要 +1
+        // Random.Next(minValue, maxValue) 是左闭右开区间，所以 maxValue 要 +1
         int randomOffsetMs;
         lock (_randomLock)
         {
-            randomOffsetMs = _random.Next(-HeartbeatRandomOffsetMs, HeartbeatRandomOffsetMs + 1); // -5000 到 +5000 毫秒
+            randomOffsetMs = _random.Next(-HeartbeatRandomOffsetMs, HeartbeatRandomOffsetMs + 1);
         }
-        int adjustedInterval = baseIntervalMs + randomOffsetMs;
-
-        // 确保间隔不会过短，例如至少 1 秒
-        if (adjustedInterval < 1000) adjustedInterval = 1000;
+        int adjustedInterval = WebSocketProtocolPolicy.CalculateHeartbeatIntervalMs(BaseHeartbeatIntervalSeconds, randomOffsetMs);
 
         var heartbeatLoopCts = CreateLinkedTokenSource();
         _heartbeatLoopCts = heartbeatLoopCts;

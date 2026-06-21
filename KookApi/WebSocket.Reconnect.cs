@@ -245,7 +245,7 @@ namespace Emqo.KookBot_Unturned.KookApi
                 if (string.IsNullOrEmpty(_gatewayUrl))
                 {
                     Logger.LogError("❌ Failed to obtain Gateway URL, will retry.");
-                    delay = Math.Min(delay * 2, maxDelay); // Exponential backoff
+                    delay = WebSocketProtocolPolicy.CalculateNextInfiniteRetryDelayMs(delay, maxDelay); // Exponential backoff
                     continue;
                 }
 
@@ -260,7 +260,7 @@ namespace Emqo.KookBot_Unturned.KookApi
             catch (Exception ex)
             {
                 Logger.LogError($"❌ Gateway acquisition failed in infinite retry: {ex.Message}");
-                delay = Math.Min(delay * 2, maxDelay); // Exponential backoff
+                delay = WebSocketProtocolPolicy.CalculateNextInfiniteRetryDelayMs(delay, maxDelay); // Exponential backoff
             }
         }
     }

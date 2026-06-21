@@ -32,5 +32,6 @@
     <Compile Include="..\..\Detectors\IMessageDetector.cs" Link="Production\IMessageDetector.cs" />
     <Compile Include="..\..\Detectors\ForbiddenWordDetector.cs" Link="Production\ForbiddenWordDetector.cs" />
     <Compile Include="..\..\Detectors\RateLimitDetector.cs" Link="Production\RateLimitDetector.cs" />
+    <Compile Include="..\..\KookApi\WebSocketProtocolPolicy.cs" Link="Production\WebSocketProtocolPolicy.cs" />
   </ItemGroup>
 </Project>

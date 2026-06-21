@@ -55,7 +55,7 @@ namespace Emqo.KookBot_Unturned.KookApi
     private int _activeHelloTimeoutMonitors;
     private int _activePongTimeoutMonitors;
     private const int BaseHeartbeatIntervalSeconds = 30; // 基础心跳间隔 30 秒
-    private const int HeartbeatRandomOffsetMs = 2000; // 心跳随机偏移 +/- 5 秒 (5000毫秒)
+    private const int HeartbeatRandomOffsetMs = 2000; // 心跳随机偏移 +/- 2 秒
     private const int HeartbeatPongTimeoutSeconds = 6; // PONG 超时 6 秒
     private const int HelloTimeoutSeconds = 6; // HELLO 包超时 6 秒
     private const int PingTestDelay1Ms = 2000; // 心跳测试延迟 2秒
@@ -177,7 +177,7 @@ namespace Emqo.KookBot_Unturned.KookApi
                 if (attempt < maxAttempts - 1)
                 {
                     attempt++;
-                    int delay = (int)Math.Pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s
+                    int delay = WebSocketProtocolPolicy.CalculateInitialReconnectDelayMs(attempt); // Exponential backoff: 2s, 4s
                     Logger.Log($"⏰ {delay / 1000} seconds until next connection attempt...");
                     try
                     {

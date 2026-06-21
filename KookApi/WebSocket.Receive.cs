@@ -203,18 +203,11 @@ namespace Emqo.KookBot_Unturned.KookApi
                     Interlocked.Exchange(ref _lastSequenceNumber, payload.sn.Value);
                 }
 
-                // 统一处理 int 和 long 类型
-                long? messageTypeValue = null;
-                if (payload.d?.extra?.type is int intValue)
-                {
-                    messageTypeValue = intValue;
-                }
-                else if (payload.d?.extra?.type is long longValue)
-                {
-                    messageTypeValue = longValue;
-                }
+                long? messageTypeValue = WebSocketProtocolPolicy.TryGetNumericMessageType(payload.d?.extra?.type, out var parsedMessageType)
+                    ? parsedMessageType
+                    : (long?)null;
 
-                if (messageTypeValue == 9 && payload.d?.content != null)
+                if (messageTypeValue == 9)
                 {
                     await HandleTextMessageAsync(payload.d);
                 }
@@ -310,76 +303,60 @@ namespace Emqo.KookBot_Unturned.KookApi
     /// </summary>
     private async Task HandleTextMessageAsync(PayloadData payloadData)
     {
-        string id = payloadData.extra?.author?.id ?? "000000";
-        string nickname = payloadData.extra?.author?.nickname ?? "KOOK用户";
+        string id = payloadData.extra?.author?.id;
+        string nickname = payloadData.extra?.author?.nickname;
         string channelId = payloadData.target_id;
         string content = payloadData.content;
 
         var config = Config;
-        // 检查是否应该处理此消息
-        if (id == KookBot_UnturnedPlugin.authid ||
-            config == null ||
-            !config.KookToGame ||
-            channelId != config.ChannelId)
+        var decision = WebSocketProtocolPolicy.DecideIncomingText(
+            id,
+            nickname,
+            channelId,
+            content,
+            KookBot_UnturnedPlugin.authid,
+            config,
+            MaxMessageLength);
+
+        if (decision.Action == IncomingTextAction.Ignore)
         {
             return;
         }
 
-        // 处理指令或转发消息
-        if (content.StartsWith("/"))
+        if (decision.Action == IncomingTextAction.Command)
         {
             // Commands.Init 已在插件加载时调用，无需重复初始化
-            await Commands.ExecuteAsync(nickname, content, id, config.ChannelId);
+            await Commands.ExecuteAsync(decision.Nickname, decision.Content, id ?? WebSocketProtocolPolicy.DefaultAuthorId, config.ChannelId);
+            return;
         }
-        else
+
+        if (decision.WasTruncated)
         {
-            // 安全加固：输入验证和清理
-            if (string.IsNullOrWhiteSpace(content))
+            Logger.LogWarning($"⚠️ Message from {id ?? WebSocketProtocolPolicy.DefaultAuthorId} exceeded max length ({content?.Length ?? 0} > {MaxMessageLength}), truncating");
+        }
+
+        Logger.Log("🗨️ Forward to game: " + decision.FormattedMessage);
+        if (!MainThreadDispatcherGuard.TryQueue(() =>
+        {
+            try
             {
-                return;
+                SDG.Unturned.ChatManager.serverSendMessage(
+                    decision.FormattedMessage,
+                    UnityEngine.Color.white,
+                    null,
+                    null,
+                    SDG.Unturned.EChatMode.GLOBAL,
+                    null,
+                    false // 禁用 Rich Text 以防止注入攻击
+                );
             }
-
-            // 限制消息长度，防止超长消息攻击
-            if (content.Length > MaxMessageLength)
+            catch (Exception ex)
             {
-                Logger.LogWarning($"⚠️ Message from {id} exceeded max length ({content.Length} > {MaxMessageLength}), truncating");
-                content = content.Substring(0, MaxMessageLength) + "...";
+                Logger.LogError($"❌ Failed to send message to game: {ex.Message}");
             }
-
-            // 清理昵称，防止富文本注入
-            string sanitizedNickname = StringUtils.SanitizeRichText(nickname);
-
-            // 清理消息内容，防止富文本注入
-            string sanitizedContent = StringUtils.SanitizeRichText(content);
-
-            // 格式化消息
-            string formatted = config.EnableSync
-                ? $"{config.MessagePrefix} {sanitizedNickname}: {sanitizedContent}"
-                : $"{sanitizedNickname}: {sanitizedContent}";
-
-            Logger.Log("🗨️ Forward to game: " + formatted);
-            if (!MainThreadDispatcherGuard.TryQueue(() =>
-            {
-                try
-                {
-                    SDG.Unturned.ChatManager.serverSendMessage(
-                        formatted,
-                        UnityEngine.Color.white,
-                        null,
-                        null,
-                        SDG.Unturned.EChatMode.GLOBAL,
-                        null,
-                        false // 禁用 Rich Text 以防止注入攻击
-                    );
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"❌ Failed to send message to game: {ex.Message}");
-                }
-            }))
-            {
-                Logger.LogWarning($"⚠️ Main thread dispatcher is saturated, drop KOOK message from {sanitizedNickname}");
-            }
+        }))
+        {
+            Logger.LogWarning($"⚠️ Main thread dispatcher is saturated, drop KOOK message from {decision.Nickname}");
         }
     }
     }
