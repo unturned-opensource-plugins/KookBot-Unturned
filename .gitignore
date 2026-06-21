@@ -372,3 +372,8 @@ FodyWeavers.xsd
 .DS_Store
 .codegraph/
 KookBot-Unturned-*.zip
+
+# Local-only project docs (do not upload to GitHub)
+/CONTEXT.md
+/docs/
+/.local-docs/
