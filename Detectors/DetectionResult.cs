@@ -32,12 +32,10 @@ namespace Emqo.KookBot_Unturned.Detectors
         /// </summary>
         public TimeSpan? AutoMuteDuration { get; set; }
 
-        private static readonly DetectionResult _allowed = new() { IsViolation = false };
-
         /// <summary>
         /// Create a result indicating no violation.
         /// </summary>
-        public static DetectionResult Allowed() => _allowed;
+        public static DetectionResult Allowed() => new DetectionResult { IsViolation = false };
 
         /// <summary>
         /// Create a result indicating a violation.

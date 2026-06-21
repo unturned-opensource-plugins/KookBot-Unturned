@@ -101,3 +101,78 @@ namespace Emqo.KookBot_Unturned
         }
     }
 }
+
+namespace Steamworks
+{
+    public readonly struct CSteamID : IEquatable<CSteamID>
+    {
+        private readonly ulong _value;
+
+        public CSteamID(ulong value)
+        {
+            _value = value;
+        }
+
+        public bool Equals(CSteamID other) => _value == other._value;
+        public override bool Equals(object obj) => obj is CSteamID other && Equals(other);
+        public override int GetHashCode() => _value.GetHashCode();
+        public override string ToString() => _value.ToString();
+        public static bool operator ==(CSteamID left, CSteamID right) => left.Equals(right);
+        public static bool operator !=(CSteamID left, CSteamID right) => !left.Equals(right);
+    }
+}
+
+namespace Rocket.Unturned.Player
+{
+    public class UnturnedPlayer
+    {
+        public Steamworks.CSteamID CSteamID { get; set; }
+        public string DisplayName { get; set; }
+        public string CharacterName { get; set; }
+    }
+}
+
+namespace Emqo.KookBot_Unturned
+{
+    internal class MuteInfo
+    {
+        public Steamworks.CSteamID SteamId { get; set; }
+        public string PlayerName { get; set; }
+        public string Reason { get; set; }
+        public string MutedBy { get; set; }
+        public DateTimeOffset MutedAt { get; set; }
+        public DateTimeOffset? ExpiresAt { get; set; }
+        public bool IsAuto { get; set; }
+
+        public bool IsExpired => ExpiresAt.HasValue && DateTimeOffset.UtcNow >= ExpiresAt.Value;
+
+        public TimeSpan? Remaining =>
+            ExpiresAt.HasValue ? ExpiresAt.Value - DateTimeOffset.UtcNow : (TimeSpan?)null;
+
+        public string GetDurationDescription()
+        {
+            if (!ExpiresAt.HasValue)
+            {
+                return "permanent";
+            }
+
+            var remaining = ExpiresAt.Value - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+            {
+                return "expiring soon";
+            }
+
+            if (remaining.TotalHours >= 1)
+            {
+                return $"{Math.Ceiling(remaining.TotalHours)} hours";
+            }
+
+            if (remaining.TotalMinutes >= 1)
+            {
+                return $"{Math.Ceiling(remaining.TotalMinutes)} minutes";
+            }
+
+            return $"{Math.Ceiling(remaining.TotalSeconds)} seconds";
+        }
+    }
+}

@@ -26,5 +26,11 @@
     <Compile Include="..\..\ConfigurationHotReloadService.cs" Link="Production\ConfigurationHotReloadService.cs" />
     <Compile Include="..\..\Interfaces\IConfigurationProvider.cs" Link="Production\IConfigurationProvider.cs" />
     <Compile Include="..\..\Interfaces\DefaultConfigurationProvider.cs" Link="Production\DefaultConfigurationProvider.cs" />
+    <Compile Include="..\..\MuteRegistry.cs" Link="Production\MuteRegistry.cs" />
+    <Compile Include="..\..\MessageDetectorRegistry.cs" Link="Production\MessageDetectorRegistry.cs" />
+    <Compile Include="..\..\Detectors\DetectionResult.cs" Link="Production\DetectionResult.cs" />
+    <Compile Include="..\..\Detectors\IMessageDetector.cs" Link="Production\IMessageDetector.cs" />
+    <Compile Include="..\..\Detectors\ForbiddenWordDetector.cs" Link="Production\ForbiddenWordDetector.cs" />
+    <Compile Include="..\..\Detectors\RateLimitDetector.cs" Link="Production\RateLimitDetector.cs" />
   </ItemGroup>
 </Project>
