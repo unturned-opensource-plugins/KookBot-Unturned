@@ -177,7 +177,7 @@ jobs:
           body_path: dist/RELEASE_NOTES.md
           files: |
             dist/${{ needs.build.outputs.zip_name }}
-            dist/KookBot-Unturned.dll
+            dist/release/KookBot-Unturned.dll
             dist/checksums.sha256
           draft: false
           prerelease: false
