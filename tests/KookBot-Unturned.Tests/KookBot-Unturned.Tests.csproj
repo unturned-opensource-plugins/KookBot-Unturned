@@ -11,6 +11,7 @@
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.2" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
@@ -20,5 +21,7 @@
     <Compile Include="..\..\PvpEventRuntime.cs" Link="Production\PvpEventRuntime.cs" />
     <Compile Include="..\..\KookSendQueue.cs" Link="Production\KookSendQueue.cs" />
     <Compile Include="..\..\KookAdminCommandHandler.cs" Link="Production\KookAdminCommandHandler.cs" />
+    <Compile Include="..\..\KookApi\KookCardFactory.cs" Link="Production\KookCardFactory.cs" />
+    <Compile Include="..\..\Utilities\StringUtils.cs" Link="Production\StringUtils.cs" />
   </ItemGroup>
 </Project>

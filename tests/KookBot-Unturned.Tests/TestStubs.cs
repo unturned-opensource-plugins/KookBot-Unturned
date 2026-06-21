@@ -39,14 +39,6 @@ namespace Emqo.KookBot_Unturned.KookApi
             return Task.FromResult("{}");
         }
     }
-
-    internal static class KookCardFactory
-    {
-        public static string BuildMarkdownCard(string emoji, string title, string markdownBody, DateTimeOffset timestamp, string theme = "secondary")
-        {
-            return $"{emoji} {title}\n{markdownBody}\n{theme}";
-        }
-    }
 }
 
 namespace Emqo.KookBot_Unturned
@@ -61,5 +53,18 @@ namespace Emqo.KookBot_Unturned
         }
 
         public static string BuildDiagnosticsReport() => "diagnostics";
+    }
+}
+
+namespace Emqo.KookBot_Unturned.Monitoring
+{
+    internal class ServerStatusSnapshot
+    {
+        public DateTimeOffset CapturedAt { get; set; }
+        public int OnlinePlayers { get; set; }
+        public int MaxPlayers { get; set; }
+        public int QueueLength { get; set; }
+        public int EstimatedTps { get; set; }
+        public TimeSpan Uptime { get; set; }
     }
 }

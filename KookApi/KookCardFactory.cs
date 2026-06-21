@@ -23,8 +23,10 @@ namespace Emqo.KookBot_Unturned.KookApi
                 $"**运行时间**：`{FormatTimespan(snapshot.Uptime)}`"
             };
 
+            serverName = string.IsNullOrWhiteSpace(serverName) ? "Unturned" : serverName;
+
             var card = CreateCard(
-                $"{serverName ?? "Unturned"} 状态面板",
+                $"{serverName} 状态面板",
                 snapshot.EstimatedTps >= 30 ? "success" : "warning",
                 string.Join("\n", bodyLines),
                 $"最后刷新：`{snapshot.CapturedAt:yyyy-MM-dd HH:mm:ss}`"
@@ -70,6 +72,7 @@ namespace Emqo.KookBot_Unturned.KookApi
 
         public static string BuildChatMessageCard(string chatScope, string playerName, string content, DateTimeOffset timestamp, string statusTag = "")
         {
+            chatScope = string.IsNullOrWhiteSpace(chatScope) ? "GLOBAL" : chatScope;
             playerName = string.IsNullOrWhiteSpace(playerName) ? "未知玩家" : playerName;
             content = string.IsNullOrWhiteSpace(content) ? "（空消息）" : content;
 
