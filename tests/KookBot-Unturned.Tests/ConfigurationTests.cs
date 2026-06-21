@@ -28,6 +28,12 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void ChatModerationConfig_does_not_expose_removed_broadcast_spam_mutes_tombstone()
+    {
+        Assert.Null(typeof(ChatModerationConfig).GetProperty("BroadcastSpamMutes"));
+    }
+
+    [Fact]
     public void ConvertListsToDictionaries_normalizes_console_aliases_as_one_safety_group()
     {
         var config = new KookBot_UnturnedConfiguration

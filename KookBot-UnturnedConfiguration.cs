@@ -334,7 +334,6 @@ namespace Emqo.KookBot_Unturned
         public bool EnableModeration { get; set; }
         public int DefaultManualMuteMinutes { get; set; }
         public bool BroadcastAutoMutes { get; set; }
-        public bool BroadcastSpamMutes { get; set; }
 
         // Rate limit detection settings
         public bool EnableRateLimitDetection { get; set; }
@@ -356,7 +355,6 @@ namespace Emqo.KookBot_Unturned
                 EnableModeration = true,
                 DefaultManualMuteMinutes = 10,
                 BroadcastAutoMutes = true,
-                BroadcastSpamMutes = true,
 
                 // Rate limit defaults
                 EnableRateLimitDetection = true,
@@ -385,11 +383,6 @@ namespace Emqo.KookBot_Unturned
             if (DefaultManualMuteMinutes <= 0)
             {
                 DefaultManualMuteMinutes = defaults.DefaultManualMuteMinutes;
-            }
-
-            if (!BroadcastAutoMutes && BroadcastSpamMutes)
-            {
-                BroadcastAutoMutes = true;
             }
 
             // Rate limit defaults
@@ -427,8 +420,7 @@ namespace Emqo.KookBot_Unturned
         {
             EnableModeration = other.EnableModeration;
             DefaultManualMuteMinutes = other.DefaultManualMuteMinutes;
-            BroadcastAutoMutes = other.BroadcastAutoMutes || other.BroadcastSpamMutes;
-            BroadcastSpamMutes = other.BroadcastSpamMutes;
+            BroadcastAutoMutes = other.BroadcastAutoMutes;
 
             EnableRateLimitDetection = other.EnableRateLimitDetection;
             MinimumSecondsBetweenMessages = other.MinimumSecondsBetweenMessages;

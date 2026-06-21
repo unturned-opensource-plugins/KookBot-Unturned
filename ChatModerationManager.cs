@@ -171,7 +171,7 @@ namespace Emqo.KookBot_Unturned
                             result.AppliedMute = appliedMute;
 
                             // Broadcast if enabled
-                            if (settings.BroadcastAutoMutes || settings.BroadcastSpamMutes)
+                            if (settings.BroadcastAutoMutes)
                             {
                                 BroadcastMuteToAll(player.DisplayName ?? player.CharacterName, appliedMute);
                             }

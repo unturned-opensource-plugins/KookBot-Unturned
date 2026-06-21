@@ -134,8 +134,7 @@ jobs:
             "2. Copy ``KookBot-Unturned.dll`` into ``Rocket/Plugins/``.",
             "3. Keep the existing production configuration unless intentionally changing settings.",
             "4. Restart the target server/container.",
-            "",
-            "See ``docs/rollouts/`` for production rollout checklists."
+            ""
           )
           $notes -join "`n" | Out-File -FilePath 'RELEASE_NOTES.md' -Encoding utf8
 
