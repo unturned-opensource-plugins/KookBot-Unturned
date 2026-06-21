@@ -195,7 +195,7 @@ namespace Emqo.KookBot_Unturned
             return Task.CompletedTask;
         }
 
-        private static KookBot_UnturnedConfiguration LoadConfiguration(string path)
+        internal static KookBot_UnturnedConfiguration LoadConfiguration(string path)
         {
             try
             {

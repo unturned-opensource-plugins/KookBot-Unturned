@@ -52,7 +52,14 @@ namespace Emqo.KookBot_Unturned
             RuntimeEvents[eventName] = enabled;
         }
 
+        public static string LastChannel { get; private set; }
+
         public static string BuildDiagnosticsReport() => "diagnostics";
+
+        public static void UpdateChannel(string channelId)
+        {
+            LastChannel = channelId;
+        }
     }
 }
 
@@ -66,5 +73,31 @@ namespace Emqo.KookBot_Unturned.Monitoring
         public int QueueLength { get; set; }
         public int EstimatedTps { get; set; }
         public TimeSpan Uptime { get; set; }
+    }
+}
+
+namespace Emqo.KookBot_Unturned
+{
+    internal sealed class PluginConfigurationHolder
+    {
+        public KookBot_UnturnedConfiguration Instance { get; set; }
+    }
+
+    internal sealed class KookBot_UnturnedPlugin
+    {
+        public static KookBot_UnturnedPlugin Instance { get; set; }
+        public PluginConfigurationHolder Configuration { get; set; } = new PluginConfigurationHolder();
+
+        public static TimeSpan GetUptime() => TimeSpan.Zero;
+    }
+
+    internal static class ChatModerationManager
+    {
+        public static ChatModerationConfig LastUpdatedConfig { get; private set; }
+
+        public static void UpdateConfig(ChatModerationConfig config)
+        {
+            LastUpdatedConfig = config;
+        }
     }
 }

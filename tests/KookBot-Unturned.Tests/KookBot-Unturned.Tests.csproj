@@ -23,5 +23,8 @@
     <Compile Include="..\..\KookAdminCommandHandler.cs" Link="Production\KookAdminCommandHandler.cs" />
     <Compile Include="..\..\KookApi\KookCardFactory.cs" Link="Production\KookCardFactory.cs" />
     <Compile Include="..\..\Utilities\StringUtils.cs" Link="Production\StringUtils.cs" />
+    <Compile Include="..\..\ConfigurationHotReloadService.cs" Link="Production\ConfigurationHotReloadService.cs" />
+    <Compile Include="..\..\Interfaces\IConfigurationProvider.cs" Link="Production\IConfigurationProvider.cs" />
+    <Compile Include="..\..\Interfaces\DefaultConfigurationProvider.cs" Link="Production\DefaultConfigurationProvider.cs" />
   </ItemGroup>
 </Project>
