@@ -37,16 +37,8 @@ namespace Emqo.KookBot_Unturned
                 _startedAt = DateTimeOffset.UtcNow;
                 _configProvider = new DefaultConfigurationProvider(() => Configuration?.Instance);
 
-                if (Configuration.Instance.GameToKookSettings == null || Configuration.Instance.CommandSettings == null)
-                {
-                    Logger.Log("🔍 Loading default configuration...");
-                    Configuration.Instance.LoadDefaults();
-                }
-                else
-                {
-                    Logger.Log("🔍 Converting configuration lists to dictionaries...");
-                    Configuration.Instance.ConvertListsToDictionaries();
-                }
+                Logger.Log("🔍 Normalizing configuration lists...");
+                Configuration.Instance.ConvertListsToDictionaries();
 
                 // Validate critical configuration
                 if (string.IsNullOrWhiteSpace(Configuration.Instance.BotToken))
@@ -82,6 +74,9 @@ namespace Emqo.KookBot_Unturned
                     return;
                 }
 
+                Logger.Log("🔍 Initializing commands...");
+                Commands.Init(_kookMessageApi);
+
                 Logger.Log("🔍 Starting WebSocket client...");
                 _client = new KookWebSocketClient(Configuration.Instance.BotToken, _configProvider);
                 try
@@ -98,9 +93,6 @@ namespace Emqo.KookBot_Unturned
                         Logger.LogError($"Inner exception: {ex.InnerException.Message}");
                     }
                 }
-
-                Logger.Log("🔍 Initializing commands...");
-                Commands.Init(_kookMessageApi);
 
                 Logger.Log("🔍 Starting configuration hot reload service...");
                 _configFilePath = ResolveConfigPath();
@@ -162,7 +154,7 @@ namespace Emqo.KookBot_Unturned
         {
             try
             {
-                if (_isFullyLoaded && _kookMessageApi != null && Configuration.Instance.IsGameToKookEnabled("ServerStart"))
+                if (LifecycleEventPolicy.ShouldSendServerStop(Configuration.Instance, _isFullyLoaded, _kookMessageApi != null))
                 {
                     try
                     {
@@ -206,7 +198,6 @@ namespace Emqo.KookBot_Unturned
 
         public override TranslationList DefaultTranslations => new()
         {
-            { "test", "test" },
         };
 
         private string ResolveConfigPath()

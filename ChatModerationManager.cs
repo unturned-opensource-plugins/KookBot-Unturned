@@ -24,7 +24,6 @@ namespace Emqo.KookBot_Unturned
         private static long _initializeGeneration;
 
         // Cleanup throttling
-        private static DateTimeOffset _lastCleanupTime = DateTimeOffset.MinValue;
         private const int CleanupIntervalSeconds = 60;
 
         private static ChatModerationConfig _config;

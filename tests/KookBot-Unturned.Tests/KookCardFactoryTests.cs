@@ -49,6 +49,15 @@ public class KookCardFactoryTests
     }
 
     [Fact]
+    public void BuildChatMessageCard_renders_status_tag_when_provided()
+    {
+        var json = KookCardFactory.BuildChatMessageCard("GLOBAL", "Alice", "blocked", DateTimeOffset.Parse("2026-06-21T20:01:02+00:00"), " 🚫");
+        var card = FirstCard(json);
+
+        Assert.Equal("💬 游戏聊天 (GLOBAL) 🚫", HeaderText(card));
+    }
+
+    [Fact]
     public void BuildGenericEventCard_filters_empty_fields_and_keeps_context()
     {
         var json = KookCardFactory.BuildGenericEventCard(

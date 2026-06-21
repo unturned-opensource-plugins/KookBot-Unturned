@@ -1,4 +1,5 @@
 using Emqo.KookBot_Unturned;
+using Emqo.KookBot_Unturned.KookApi;
 using Xunit;
 
 namespace Emqo.KookBot_Unturned.Tests;
@@ -107,5 +108,58 @@ public class KookAdminCommandHandlerTests
         Assert.Equal(new[] { "status" }, changed);
         Assert.False(config.IsCommandEnabled("status"));
         Assert.True(config.IsCommandEnabled("help"));
+    }
+
+    [Fact]
+    public async Task Event_shorthand_updates_runtime_event_switch()
+    {
+        var config = new KookBot_UnturnedConfiguration();
+        config.LoadDefaults();
+        Events.RuntimeEvents.Clear();
+        var message = new Message();
+
+        await KookAdminCommandHandler.HandleAsync("event", "PlayerDamaged off", "admin", "channel", isAdmin: true, message, config);
+
+        Assert.False(Events.RuntimeEvents["PlayerDamaged"]);
+        Assert.Contains("PlayerDamaged", message.Sent.Single().Content.ToString());
+    }
+
+    [Fact]
+    public async Task Command_shorthand_updates_runtime_command_switch()
+    {
+        var config = new KookBot_UnturnedConfiguration();
+        config.LoadDefaults();
+        var message = new Message();
+
+        await KookAdminCommandHandler.HandleAsync("command", "status off", "admin", "channel", isAdmin: true, message, config);
+
+        Assert.False(config.IsCommandEnabled("status"));
+        Assert.Contains("status", message.Sent.Single().Content.ToString());
+    }
+
+    [Fact]
+    public async Task Event_status_alias_lists_event_switches()
+    {
+        var config = new KookBot_UnturnedConfiguration();
+        config.LoadDefaults();
+        var message = new Message();
+
+        await KookAdminCommandHandler.HandleAsync("event", "status", "admin", "channel", isAdmin: true, message, config);
+
+        Assert.Contains("PlayerDamaged", message.Sent.Single().Content.ToString());
+    }
+
+    [Fact]
+    public async Task Event_invalid_boolean_reply_includes_full_event_usage()
+    {
+        var config = new KookBot_UnturnedConfiguration();
+        config.LoadDefaults();
+        var message = new Message();
+
+        await KookAdminCommandHandler.HandleAsync("event", "PlayerDamaged maybe", "admin", "channel", isAdmin: true, message, config);
+
+        var content = message.Sent.Single().Content.ToString();
+        Assert.Contains("/event set", content);
+        Assert.Contains("/event <事件名>", content);
     }
 }

@@ -205,7 +205,7 @@ namespace Emqo.KookBot_Unturned
 
             try
             {
-                var clients = Provider.clients;
+                var clients = Provider.clients?.ToList();
                 if (clients == null)
                 {
                     return false;

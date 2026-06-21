@@ -91,52 +91,77 @@ namespace Emqo.KookBot_Unturned
             _ = OnFileChangedAsync();
         }
 
+        internal static Task TriggerFileChangedForTestsAsync()
+        {
+            return OnFileChangedAsync();
+        }
+
         private static async Task OnFileChangedAsync()
         {
-            Interlocked.Increment(ref _reloadTriggerCount);
-
-            // 检查 _semaphore 是否已被释放
-            if (_semaphore == null)
-            {
-                return;
-            }
-
-            // Cancel any pending debounced reload before acquiring semaphore
-            CancellationToken cancellationToken;
-            lock (_debounceLock)
-            {
-                _debounceCts?.Cancel();
-                _debounceCts?.Dispose();
-                _debounceCts = new CancellationTokenSource();
-                cancellationToken = _debounceCts.Token;
-            }
-
             try
             {
-                // Proper debounce: wait before processing
-                await Task.Delay(DebounceDelayMs, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                // Another change came in, this reload was superseded
-                return;
-            }
+                Interlocked.Increment(ref _reloadTriggerCount);
 
-            // Only acquire semaphore after debounce completes
-            await _semaphore.WaitAsync();
-            try
-            {
-                // Double-check cancellation after acquiring semaphore
-                if (cancellationToken.IsCancellationRequested)
+                var semaphore = _semaphore;
+                if (semaphore == null)
                 {
                     return;
                 }
 
-                await ReloadConfigurationAsync();
+                // Cancel any pending debounced reload before acquiring semaphore
+                CancellationToken cancellationToken;
+                lock (_debounceLock)
+                {
+                    _debounceCts?.Cancel();
+                    _debounceCts?.Dispose();
+                    _debounceCts = new CancellationTokenSource();
+                    cancellationToken = _debounceCts.Token;
+                }
+
+                try
+                {
+                    // Proper debounce: wait before processing
+                    await Task.Delay(DebounceDelayMs, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Another change came in, or hot reload was stopped.
+                    return;
+                }
+
+                if (cancellationToken.IsCancellationRequested || !ReferenceEquals(semaphore, _semaphore))
+                {
+                    return;
+                }
+
+                // Only acquire semaphore after debounce completes
+                await semaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    // Double-check cancellation after acquiring semaphore
+                    if (cancellationToken.IsCancellationRequested || !ReferenceEquals(semaphore, _semaphore))
+                    {
+                        return;
+                    }
+
+                    await ReloadConfigurationAsync();
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
             }
-            finally
+            catch (ObjectDisposedException)
             {
-                _semaphore.Release();
+                // Stop() can dispose the debounce/semaphore while a watcher callback is in-flight.
+            }
+            catch (OperationCanceledException)
+            {
+                // Stop() or a newer file change canceled this reload.
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"❌ Failed to process configuration hot reload event: {ex.Message}");
             }
         }
 

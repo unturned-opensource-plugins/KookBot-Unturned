@@ -10,6 +10,8 @@ namespace Emqo.KookBot_Unturned
 {
     internal static class KookAdminCommandHandler
     {
+        private const string EventUsage = "`/event list`\n`/event status`\n`/event set <事件名> <true|false>`\n`/event <事件名> <on|off>`";
+        private const string CommandUsage = "`/command list`\n`/command set <指令名> <true|false>`\n`/command <指令名> <on|off>`";
         private static readonly HashSet<string> RescueCommands = new(StringComparer.OrdinalIgnoreCase)
         {
             "event",
@@ -32,6 +34,12 @@ namespace Emqo.KookBot_Unturned
             Message message,
             KookBot_UnturnedConfiguration config)
         {
+            if (message == null)
+            {
+                Logger.LogError($"❌ Cannot handle /{command}: KOOK message API is not initialized.");
+                return;
+            }
+
             switch (command)
             {
                 case "event":
@@ -55,18 +63,17 @@ namespace Emqo.KookBot_Unturned
             }
 
             var parts = SplitArgs(args);
-            if (parts.Length == 0 || IsListAction(parts[0]))
+            if (parts.Length == 0 || IsEventListAction(parts[0]))
             {
                 await SendSettingsListAsync("事件同步开关", config?.GetGameToKookSnapshot(), channelId, message);
                 return;
             }
 
-            if (parts.Length == 3 && IsSetAction(parts[0]))
+            if (TryParseSwitchMutation(parts, out var eventName, out var enabled, out var parseErrorUsage))
             {
-                var eventName = parts[1];
-                if (!TryParseBoolean(parts[2], out var enabled))
+                if (!string.IsNullOrEmpty(parseErrorUsage))
                 {
-                    await message.CreateMessageAsync(10, channelId, BuildWarningCard("参数错误", "`/event set <事件名> <true|false>`"));
+                    await message.CreateMessageAsync(10, channelId, BuildWarningCard("参数错误", EventUsage));
                     return;
                 }
 
@@ -83,7 +90,7 @@ namespace Emqo.KookBot_Unturned
                 return;
             }
 
-            await message.CreateMessageAsync(10, channelId, BuildWarningCard("用法错误", "`/event list`\n`/event set <事件名> <true|false>`"));
+            await message.CreateMessageAsync(10, channelId, BuildWarningCard("用法错误", EventUsage));
         }
 
         private static async Task HandleCommandSwitchCommand(string args, string id, string channelId, bool isAdmin, Message message, KookBot_UnturnedConfiguration config)
@@ -95,24 +102,24 @@ namespace Emqo.KookBot_Unturned
             }
 
             var parts = SplitArgs(args);
-            if (parts.Length == 0 || IsListAction(parts[0]))
+            if (parts.Length == 0 || IsCommandListAction(parts[0]))
             {
                 await SendSettingsListAsync("指令开关", config?.GetCommandSnapshot(), channelId, message);
                 return;
             }
 
-            if (parts.Length == 3 && IsSetAction(parts[0]))
+            if (TryParseSwitchMutation(parts, out var commandName, out var enabled, out var parseErrorUsage))
             {
-                var commandName = parts[1].ToLowerInvariant();
+                commandName = commandName.ToLowerInvariant();
                 if (!IsMutableCommandSwitch(commandName))
                 {
                     await message.CreateMessageAsync(10, channelId, BuildErrorCard("不能关闭救援入口", $"`/{commandName}` 是运维救援入口，只受管理员权限控制。"));
                     return;
                 }
 
-                if (!TryParseBoolean(parts[2], out var enabled))
+                if (!string.IsNullOrEmpty(parseErrorUsage))
                 {
-                    await message.CreateMessageAsync(10, channelId, BuildWarningCard("参数错误", "`/command set <指令名> <true|false>`"));
+                    await message.CreateMessageAsync(10, channelId, BuildWarningCard("参数错误", CommandUsage));
                     return;
                 }
 
@@ -130,7 +137,7 @@ namespace Emqo.KookBot_Unturned
                 return;
             }
 
-            await message.CreateMessageAsync(10, channelId, BuildWarningCard("用法错误", "`/command list`\n`/command set <指令名> <true|false>`"));
+            await message.CreateMessageAsync(10, channelId, BuildWarningCard("用法错误", CommandUsage));
         }
 
         private static async Task HandleDiagCommand(string id, string channelId, bool isAdmin, Message message)
@@ -201,7 +208,13 @@ namespace Emqo.KookBot_Unturned
                 : args.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
         }
 
-        private static bool IsListAction(string action)
+        private static bool IsEventListAction(string action)
+        {
+            return string.Equals(action, "list", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(action, "status", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCommandListAction(string action)
         {
             return string.Equals(action, "list", StringComparison.OrdinalIgnoreCase);
         }
@@ -209,6 +222,42 @@ namespace Emqo.KookBot_Unturned
         private static bool IsSetAction(string action)
         {
             return string.Equals(action, "set", StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static bool TryParseSwitchMutation(string[] parts, out string name, out bool enabled, out string errorUsage)
+        {
+            name = null;
+            enabled = false;
+            errorUsage = null;
+
+            if (parts == null)
+            {
+                return false;
+            }
+
+            if (parts.Length == 3 && IsSetAction(parts[0]))
+            {
+                name = parts[1];
+                if (!TryParseBoolean(parts[2], out enabled))
+                {
+                    errorUsage = "`set` 用法：`set <名称> <true|false>`";
+                }
+
+                return true;
+            }
+
+            if (parts.Length == 2)
+            {
+                name = parts[0];
+                if (!TryParseBoolean(parts[1], out enabled))
+                {
+                    errorUsage = "简写用法：`<名称> <on|off>`";
+                }
+
+                return true;
+            }
+
+            return false;
         }
 
         internal static bool TryParseBoolean(string value, out bool result)

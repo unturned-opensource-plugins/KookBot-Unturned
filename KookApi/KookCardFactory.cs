@@ -75,13 +75,14 @@ namespace Emqo.KookBot_Unturned.KookApi
             chatScope = string.IsNullOrWhiteSpace(chatScope) ? "GLOBAL" : chatScope;
             playerName = string.IsNullOrWhiteSpace(playerName) ? "未知玩家" : playerName;
             content = string.IsNullOrWhiteSpace(content) ? "（空消息）" : content;
+            statusTag = string.IsNullOrWhiteSpace(statusTag) ? string.Empty : statusTag;
 
             var modules = new List<object>
             {
                 new
                 {
                     type = "header",
-                    text = new { type = "plain-text", content = $"💬 游戏聊天 ({chatScope})" }
+                    text = new { type = "plain-text", content = $"💬 游戏聊天 ({chatScope}){statusTag}" }
                 },
                 new
                 {

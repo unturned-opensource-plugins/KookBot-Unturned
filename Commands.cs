@@ -61,6 +61,12 @@ namespace Emqo.KookBot_Unturned
                 return;
             }
 
+            if (_message == null)
+            {
+                Logger.LogError($"❌ Cannot handle /{command}: KOOK message API is not initialized.");
+                return;
+            }
+
             // 检查指令是否被禁用
             if (Config != null && !Config.IsCommandEnabled(command))
             {

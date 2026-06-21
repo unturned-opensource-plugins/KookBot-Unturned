@@ -45,6 +45,11 @@ public class ConfigurationCompatibilityTests : IDisposable
         config.ConvertListsToDictionaries();
 
         Assert.Equal("Legacy", config.ServerName);
+        Assert.Equal("token", config.BotToken);
+        Assert.Equal("channel", config.ChannelId);
+        Assert.Equal("[U]", config.MessagePrefix);
+        Assert.True(config.EnableSync);
+        Assert.True(config.KookToGame);
         Assert.True(config.IsGameToKookEnabled("PlayerJoined"));
         Assert.True(config.IsGameToKookEnabled("PlayerDamaged"));
         Assert.True(config.IsCommandEnabled("help"));
@@ -151,6 +156,26 @@ public class ConfigurationCompatibilityTests : IDisposable
         current.TrySetGameToKookRuntime("PlayerDamaged", false);
 
         Assert.False(provider.IsGameToKookEnabled("PlayerDamaged"));
+    }
+
+    [Fact]
+    public async Task Hot_reload_file_changed_task_tolerates_stop_during_debounce()
+    {
+        var path = WriteConfig("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <KookBot_UnturnedConfiguration>
+              <ServerName>Legacy</ServerName>
+              <BotToken>token</BotToken>
+              <ChannelId>channel</ChannelId>
+            </KookBot_UnturnedConfiguration>
+            """);
+        ConfigurationHotReloadService.Start(path);
+
+        var pending = ConfigurationHotReloadService.TriggerFileChangedForTestsAsync();
+        ConfigurationHotReloadService.Stop();
+        await pending;
+
+        Assert.DoesNotContain(Logger.Messages, message => message.Contains("Failed to process configuration hot reload event"));
     }
 
     private string WriteConfig(string contents)
