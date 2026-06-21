@@ -22,3 +22,44 @@ namespace Rocket.Core.Logging
 namespace SDG.Unturned
 {
 }
+
+namespace Emqo.KookBot_Unturned.KookApi
+{
+    public class Message
+    {
+        public readonly List<(int Type, string ChannelId, object Content)> Sent = new();
+
+        public Message(string botToken = "test-token")
+        {
+        }
+
+        public Task<string> CreateMessageAsync(int type, string channelId, object content)
+        {
+            Sent.Add((type, channelId, content));
+            return Task.FromResult("{}");
+        }
+    }
+
+    internal static class KookCardFactory
+    {
+        public static string BuildMarkdownCard(string emoji, string title, string markdownBody, DateTimeOffset timestamp, string theme = "secondary")
+        {
+            return $"{emoji} {title}\n{markdownBody}\n{theme}";
+        }
+    }
+}
+
+namespace Emqo.KookBot_Unturned
+{
+    internal static class Events
+    {
+        public static readonly Dictionary<string, bool> RuntimeEvents = new(StringComparer.OrdinalIgnoreCase);
+
+        public static void SetEventEnabled(string eventName, bool enabled)
+        {
+            RuntimeEvents[eventName] = enabled;
+        }
+
+        public static string BuildDiagnosticsReport() => "diagnostics";
+    }
+}

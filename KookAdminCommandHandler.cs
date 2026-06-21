@@ -104,7 +104,7 @@ namespace Emqo.KookBot_Unturned
             if (parts.Length == 3 && IsSetAction(parts[0]))
             {
                 var commandName = parts[1].ToLowerInvariant();
-                if (IsRescueCommand(commandName))
+                if (!IsMutableCommandSwitch(commandName))
                 {
                     await message.CreateMessageAsync(10, channelId, BuildErrorCard("不能关闭救援入口", $"`/{commandName}` 是运维救援入口，只受管理员权限控制。"));
                     return;
@@ -147,7 +147,12 @@ namespace Emqo.KookBot_Unturned
             Logger.Log($"🛟 Diagnostics requested by {id}");
         }
 
-        private static IReadOnlyList<string> SetCommandRuntime(KookBot_UnturnedConfiguration config, string commandName, bool enabled)
+        internal static bool IsMutableCommandSwitch(string commandName)
+        {
+            return !IsRescueCommand(commandName);
+        }
+
+        internal static IReadOnlyList<string> SetCommandRuntime(KookBot_UnturnedConfiguration config, string commandName, bool enabled)
         {
             var names = ConsoleCommandAliases.Contains(commandName, StringComparer.OrdinalIgnoreCase)
                 ? ConsoleCommandAliases
@@ -189,7 +194,7 @@ namespace Emqo.KookBot_Unturned
             }
         }
 
-        private static string[] SplitArgs(string args)
+        internal static string[] SplitArgs(string args)
         {
             return string.IsNullOrWhiteSpace(args)
                 ? Array.Empty<string>()
@@ -206,7 +211,7 @@ namespace Emqo.KookBot_Unturned
             return string.Equals(action, "set", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool TryParseBoolean(string value, out bool result)
+        internal static bool TryParseBoolean(string value, out bool result)
         {
             switch (value?.Trim().ToLowerInvariant())
             {

@@ -19,5 +19,6 @@
     <Compile Include="..\..\KookBot-UnturnedConfiguration.cs" Link="Production\KookBot-UnturnedConfiguration.cs" />
     <Compile Include="..\..\PvpEventRuntime.cs" Link="Production\PvpEventRuntime.cs" />
     <Compile Include="..\..\KookSendQueue.cs" Link="Production\KookSendQueue.cs" />
+    <Compile Include="..\..\KookAdminCommandHandler.cs" Link="Production\KookAdminCommandHandler.cs" />
   </ItemGroup>
 </Project>
