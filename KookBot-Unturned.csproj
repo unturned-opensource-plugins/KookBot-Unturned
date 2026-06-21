@@ -4,7 +4,7 @@
     <TargetFramework>net48</TargetFramework>
 	  <LangVersion>latest</LangVersion>
 	  <RootNamespace>Emqo.KookBot_Unturned</RootNamespace>
-    <Version>1.2.0</Version>
+    <Version>1.2.1</Version>
     <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
   </PropertyGroup>
 
