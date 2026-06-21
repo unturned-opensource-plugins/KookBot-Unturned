@@ -158,17 +158,12 @@ namespace Emqo.KookBot_Unturned
 
                 try
                 {
-                    // 玩家事件
-                    U.Events.OnPlayerConnected += OnPlayerConnected;
-                    U.Events.OnPlayerDisconnected += OnPlayerDisconnected;
-                    UnturnedPlayerEvents.OnPlayerDeath += OnPlayerDeath;
-                    UnturnedPlayerEvents.OnPlayerRevive += OnPlayerRevive;
-                    UnturnedPlayerEvents.OnPlayerChatted += OnPlayerChatted;
+                    _eventsRegistered = EventSubscriptionRegistry.TryRegister(BuildEventSubscriptions(), Logger.LogError);
+                    if (!_eventsRegistered)
+                    {
+                        return;
+                    }
 
-                    // PvP 事件
-                    DamageTool.damagePlayerRequested += OnPlayerDamaged;
-
-                    _eventsRegistered = true;
                     Logger.Log("✅ Events registered successfully");
                 }
                 catch (Exception ex)
@@ -190,15 +185,7 @@ namespace Emqo.KookBot_Unturned
 
                 try
                 {
-                    // 玩家事件
-                    U.Events.OnPlayerConnected -= OnPlayerConnected;
-                    U.Events.OnPlayerDisconnected -= OnPlayerDisconnected;
-                    UnturnedPlayerEvents.OnPlayerDeath -= OnPlayerDeath;
-                    UnturnedPlayerEvents.OnPlayerRevive -= OnPlayerRevive;
-                    UnturnedPlayerEvents.OnPlayerChatted -= OnPlayerChatted;
-
-                    // PvP 事件
-                    DamageTool.damagePlayerRequested -= OnPlayerDamaged;
+                    EventSubscriptionRegistry.Unregister(BuildEventSubscriptions(), Logger.LogError);
 
                     _eventsRegistered = false;
                     Logger.Log("✅ Events unregistered successfully");
@@ -208,6 +195,37 @@ namespace Emqo.KookBot_Unturned
                     Logger.LogError($"Error unregistering events: {ex.Message}");
                 }
             }
+        }
+
+        private static EventSubscription[] BuildEventSubscriptions()
+        {
+            return new[]
+            {
+                new EventSubscription(
+                    nameof(U.Events.OnPlayerConnected),
+                    () => U.Events.OnPlayerConnected += OnPlayerConnected,
+                    () => U.Events.OnPlayerConnected -= OnPlayerConnected),
+                new EventSubscription(
+                    nameof(U.Events.OnPlayerDisconnected),
+                    () => U.Events.OnPlayerDisconnected += OnPlayerDisconnected,
+                    () => U.Events.OnPlayerDisconnected -= OnPlayerDisconnected),
+                new EventSubscription(
+                    nameof(UnturnedPlayerEvents.OnPlayerDeath),
+                    () => UnturnedPlayerEvents.OnPlayerDeath += OnPlayerDeath,
+                    () => UnturnedPlayerEvents.OnPlayerDeath -= OnPlayerDeath),
+                new EventSubscription(
+                    nameof(UnturnedPlayerEvents.OnPlayerRevive),
+                    () => UnturnedPlayerEvents.OnPlayerRevive += OnPlayerRevive,
+                    () => UnturnedPlayerEvents.OnPlayerRevive -= OnPlayerRevive),
+                new EventSubscription(
+                    nameof(UnturnedPlayerEvents.OnPlayerChatted),
+                    () => UnturnedPlayerEvents.OnPlayerChatted += OnPlayerChatted,
+                    () => UnturnedPlayerEvents.OnPlayerChatted -= OnPlayerChatted),
+                new EventSubscription(
+                    nameof(DamageTool.damagePlayerRequested),
+                    () => DamageTool.damagePlayerRequested += OnPlayerDamaged,
+                    () => DamageTool.damagePlayerRequested -= OnPlayerDamaged)
+            };
         }
     }
 }

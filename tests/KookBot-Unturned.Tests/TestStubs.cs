@@ -19,6 +19,17 @@ namespace Rocket.Core.Logging
     }
 }
 
+namespace Rocket.Core.Utils
+{
+    public static class TaskDispatcher
+    {
+        public static void QueueOnMainThread(Action action)
+        {
+            action();
+        }
+    }
+}
+
 namespace SDG.Unturned
 {
 }

@@ -351,30 +351,7 @@ namespace Emqo.KookBot_Unturned
             _cleanupCancellationTokenSource = null;
             _cleanupTask = null;
 
-            if (cancellationTokenSource != null)
-            {
-                try
-                {
-                    cancellationTokenSource.Cancel();
-                }
-                catch (ObjectDisposedException)
-                {
-                }
-            }
-
-            if (cleanupTask != null && !cleanupTask.IsCompleted)
-            {
-                try
-                {
-                    cleanupTask.Wait(TimeSpan.FromSeconds(1));
-                }
-                catch (AggregateException)
-                {
-                    // Ignore cleanup task exceptions during shutdown/restart
-                }
-            }
-
-            cancellationTokenSource?.Dispose();
+            CleanupLoopShutdown.CancelWithoutBlocking(cancellationTokenSource, cleanupTask);
         }
 
         private static string BuildMuteMessage(MuteInfo muteInfo)

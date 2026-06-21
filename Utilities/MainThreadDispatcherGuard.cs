@@ -8,8 +8,20 @@ namespace Emqo.KookBot_Unturned.Utilities
     {
         private const int MaxPendingOperations = 64;
         private static int _pendingOperations;
+        private static Action<Action> _queueOnMainThread = action => Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(action);
 
         internal static int PendingOperations => Volatile.Read(ref _pendingOperations);
+
+        internal static void SetQueueOnMainThreadForTests(Action<Action> queueOnMainThread)
+        {
+            _queueOnMainThread = queueOnMainThread ?? throw new ArgumentNullException(nameof(queueOnMainThread));
+        }
+
+        internal static void ResetQueueOnMainThreadForTests()
+        {
+            _queueOnMainThread = action => Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(action);
+            Interlocked.Exchange(ref _pendingOperations, 0);
+        }
 
         internal static bool TryQueue(Action action)
         {
@@ -38,20 +50,28 @@ namespace Emqo.KookBot_Unturned.Utilities
 
                 if (Interlocked.CompareExchange(ref _pendingOperations, current + 1, current) == current)
                 {
-                    Rocket.Core.Utils.TaskDispatcher.QueueOnMainThread(() =>
+                    try
                     {
-                        try
+                        _queueOnMainThread(() =>
                         {
-                            if (!cancellationToken.IsCancellationRequested)
+                            try
                             {
-                                action(cancellationToken);
+                                if (!cancellationToken.IsCancellationRequested)
+                                {
+                                    action(cancellationToken);
+                                }
                             }
-                        }
-                        finally
-                        {
-                            Interlocked.Decrement(ref _pendingOperations);
-                        }
-                    });
+                            finally
+                            {
+                                Interlocked.Decrement(ref _pendingOperations);
+                            }
+                        });
+                    }
+                    catch
+                    {
+                        Interlocked.Decrement(ref _pendingOperations);
+                        return false;
+                    }
 
                     return true;
                 }

@@ -21,6 +21,8 @@
     <Compile Include="..\..\PvpEventRuntime.cs" Link="Production\PvpEventRuntime.cs" />
     <Compile Include="..\..\KookSendQueue.cs" Link="Production\KookSendQueue.cs" />
     <Compile Include="..\..\LifecycleEventPolicy.cs" Link="Production\LifecycleEventPolicy.cs" />
+    <Compile Include="..\..\EventSubscriptionRegistry.cs" Link="Production\EventSubscriptionRegistry.cs" />
+    <Compile Include="..\..\CleanupLoopShutdown.cs" Link="Production\CleanupLoopShutdown.cs" />
     <Compile Include="..\..\KookAdminCommandHandler.cs" Link="Production\KookAdminCommandHandler.cs" />
     <Compile Include="..\..\CommandHelpPolicy.cs" Link="Production\CommandHelpPolicy.cs" />
     <Compile Include="..\..\KookApi\KookCardFactory.cs" Link="Production\KookCardFactory.cs" />
@@ -35,5 +37,6 @@
     <Compile Include="..\..\Detectors\ForbiddenWordDetector.cs" Link="Production\ForbiddenWordDetector.cs" />
     <Compile Include="..\..\Detectors\RateLimitDetector.cs" Link="Production\RateLimitDetector.cs" />
     <Compile Include="..\..\KookApi\WebSocketProtocolPolicy.cs" Link="Production\WebSocketProtocolPolicy.cs" />
+    <Compile Include="..\..\Utilities\MainThreadDispatcherGuard.cs" Link="Production\MainThreadDispatcherGuard.cs" />
   </ItemGroup>
 </Project>
